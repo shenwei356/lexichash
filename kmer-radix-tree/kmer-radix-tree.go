@@ -26,22 +26,23 @@ import (
 
 // leafNode is used to represent a value
 type leafNode struct {
-	key uint64 // bases in the node
-	k   uint8  // lenght of bases of the key
-	val []uint64
+	key uint64   // ALL the bases in the node, the k-mer
+	k   uint8    // lenght of bases of the key
+	val []uint64 // yes, multiple values
 }
 
 // edge is used to represent an edge node
 type edge struct {
-	label uint8 // a base in 2-bit code
-	node  *node
+	label uint8 // one base in 2-bit code
+	node  *node // the child node it connects to
 }
 
+// node represents a node in the tree, might be the root, inner or leaf node.
 type node struct {
 	leaf *leafNode // optional
 
-	prefix uint64 // prefix of current node
-	k      uint8  // lenght of bases of the prefix
+	prefix uint64 // prefix of the current node
+	k      uint8  // bases length of the prefix
 
 	edges edges // need to be sorted for fast query
 }
@@ -72,6 +73,7 @@ func (n *node) updateEdge(label uint8, node *node) {
 	panic("replacing missing edge")
 }
 
+// actually, it returns the node that the edge connects to
 func (n *node) getEdge(label uint8) *node {
 	num := len(n.edges)
 	idx := sort.Search(num, func(i int) bool {
@@ -113,18 +115,19 @@ func (e edges) Sort() {
 	sort.Sort(e)
 }
 
+// Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
-	root *node
-	size int
+	root *node // root node
+	size int   // number of the elements (nodes and edges)
 }
 
-// Tree implements a radix tree for k-mer query
+// Tree implements a radix tree for k-mer querying
 func New() *Tree {
 	t := &Tree{root: &node{}}
 	return t
 }
 
-// Len returns the number of elements
+// Len returns the number of elements (nodes and edges)
 func (t *Tree) Len() int {
 	return t.size
 }
@@ -132,23 +135,27 @@ func (t *Tree) Len() int {
 // Insert is used to add a newentry or update
 // an existing entry. Returns true if an existing record is updated.
 func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
+	key0 := key // will save it into the leaf node
+	k0 := k     // will save it into the leaf node
+
 	var parent *node
 	n := t.root
-	key0 := key
-	k0 := k
-	search := key
+	search := key // current key
 	for {
 		// Handle key exhaustion
 		if k == 0 {
 			if n.isLeaf() {
 				old := n.leaf.val
 				if n.leaf.val == nil {
-					n.leaf.val = make([]uint64, 0, 1)
+					n.leaf.val = []uint64{v}
+				} else {
+					n.leaf.val = append(n.leaf.val, v)
 				}
-				n.leaf.val = append(n.leaf.val, v)
 				return old, true
 			}
 
+			// n is not a leaf node, that means
+			// the current key is a prefix of some other keys.
 			n.leaf = &leafNode{
 				key: key0,
 				k:   k0,
@@ -192,7 +199,8 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		// Split the node
 		t.size++
 		child := &node{
-			prefix: KmerPrefix(search, k, commonPrefix), // prefix
+			// o---<=8, here the prefix of one of the 8 is ---,
+			prefix: KmerPrefix(search, k, commonPrefix),
 			k:      commonPrefix,
 		}
 		parent.updateEdge(KmerBaseAt(search, k, 0), child)
@@ -249,7 +257,7 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 
 		// Look for an edge
 		n = n.getEdge(KmerBaseAt(search, k, 0))
-		if n == nil {
+		if n == nil { // not found
 			break
 		}
 
@@ -262,6 +270,65 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 		}
 	}
 	return nil, false
+}
+
+// Search finds keys that shared a prefix at least m bases.
+func (t *Tree) Search(key uint64, k uint8, m uint8) ([]uint64, []uint8, [][]uint64, bool) {
+	if m < 1 {
+		m = 1
+	}
+	if m > k {
+		m = k
+	}
+	var target *node
+	n := t.root
+	search := key
+	var lenPrefix uint8
+	for {
+		// Check for key exhaution
+		if k == 0 {
+			break
+		}
+
+		// Look for an edge
+		n = n.getEdge(KmerBaseAt(search, k, 0))
+		if n == nil {
+			break
+		}
+
+		// Consume the search prefix
+		if KmerHasPrefix(search, n.prefix, k, n.k) {
+			search = KmerSuffix(search, k, n.k)
+			k = k - n.k
+
+			lenPrefix += n.k
+			// already matched at least m bases
+			// we can output all leaves below n
+			if lenPrefix >= m {
+				target = n
+				break
+			}
+		} else {
+			break
+		}
+	}
+
+	if target == nil {
+		return nil, nil, nil, false
+	}
+
+	// output all leaves below n
+	keys := make([]uint64, 0, 8)
+	ks := make([]uint8, 0, 8)
+	vals := make([][]uint64, 0, 8)
+	recursiveWalk(target, func(key uint64, k uint8, v []uint64) bool {
+		keys = append(keys, key)
+		ks = append(ks, k)
+		vals = append(vals, v)
+		return false
+	})
+
+	return keys, ks, vals, true
 }
 
 // LongestPrefix is like Get, but instead of an
