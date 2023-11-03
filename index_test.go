@@ -30,8 +30,8 @@ import (
 
 func TestIndex(t *testing.T) {
 	k := 21
-	nMasks := 100
-	idx, err := NewIndex(k, nMasks)
+	nMasks := 1000
+	idx, err := NewIndexWithSeed(k, nMasks, 11)
 	if err != nil {
 		t.Error(err)
 		return
@@ -62,10 +62,6 @@ func TestIndex(t *testing.T) {
 		// }
 		idx.Insert(s.ID, s.Seq.Seq)
 	}
-	// fmt.Printf("number of elements in trees:\n")
-	// for i, tree := range idx.Trees {
-	// 	fmt.Printf("tree #%d: %d\n", i, tree.Len())
-	// }
 	t.Logf("finished to build the index in %s from %d sequences with %d masks",
 		time.Since(sTime), len(seqs), nMasks)
 
@@ -82,9 +78,9 @@ func TestIndex(t *testing.T) {
 		}
 
 		for i, r := range sr {
-			t.Logf("%3s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
+			t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 			for _, v := range r.Subs[0:] {
-				t.Logf("    k:%d %s (%d-%d,%v) vs (%d-%d,%v)\n",
+				t.Logf("     k:%d %s (%d-%d,%v) vs (%d-%d,%v)\n",
 					v[0].K, v[0].KmerCode,
 					v[0].Begin+1, v[0].End, v[0].RC,
 					v[1].Begin+1, v[1].End, v[1].RC)
