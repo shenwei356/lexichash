@@ -21,7 +21,6 @@
 package lexichash
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -34,9 +33,9 @@ func TestHash(t *testing.T) {
 		return
 	}
 
-	// fmt.Println("masks:")
+	// t.Logf("masks:")
 	// for i, mask := range lh.Masks {
-	// 	fmt.Printf("  %d %s %b\n", i+1, Kmer2dna(mask, k), mask)
+	// 	t.Logf("  %d %s %b\n", i+1, Kmer2dna(mask, k), mask)
 	// }
 
 	s1 := []byte("ATGACTGCCATGGAGGAGTCACAGTCGGATATCAGCCTCGAGCTCCCTCTGAGCCAGGAGACATTTTCAGGCTTATGGAAACTACTTCCTCCAGAAGATA")
@@ -50,7 +49,7 @@ func TestHash(t *testing.T) {
 	}
 
 	for _, sub := range subs {
-		fmt.Printf("(%3d,%3d, %c) vs (%3d,%3d, %c)  %3d %s\n",
+		t.Logf("(%3d,%3d, %c) vs (%3d,%3d, %c)  %3d %s\n",
 			sub[2]>>2+1, sub[2]>>2+sub[1], strands[sub[2]&1],
 			sub[3]>>2+1, sub[3]>>2+sub[1], strands[sub[3]&1],
 			sub[1], Kmer2dna(sub[0], int(sub[1])))

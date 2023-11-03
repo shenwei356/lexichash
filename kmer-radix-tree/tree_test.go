@@ -77,7 +77,7 @@ func TestTree(t *testing.T) {
 
 	query = "ACGCA"
 	code, _ = kmers.Encode([]byte(query))
-	srs, _ := tree.Search(code, uint8(len(query)), 5)
+	srs, _ := tree.Search(code, uint8(len(query)), 4)
 	t.Logf("query: %s\n", query)
 	for _, sr := range srs {
 		t.Logf("  %s, len(prefix): %d, %v\n",

@@ -84,7 +84,10 @@ func TestIndex(t *testing.T) {
 		for i, r := range sr {
 			t.Logf("%3s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 			for _, v := range r.Subs[0:] {
-				t.Logf("    k:%d %s %d-%d rc:%v\n", v.K, v.KmerCode, v.Begin+1, v.End, v.RC)
+				t.Logf("    k:%d %s (%d-%d,%v) vs (%d-%d,%v)\n",
+					v[0].K, v[0].KmerCode,
+					v[0].Begin+1, v[0].End, v[0].RC,
+					v[1].Begin+1, v[1].End, v[1].RC)
 			}
 		}
 	}
