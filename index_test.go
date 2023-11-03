@@ -28,7 +28,7 @@ import (
 )
 
 func TestIndex(t *testing.T) {
-	k := 31
+	k := 21
 	nMasks := 200
 	idx, err := NewIndex(k, nMasks)
 	if err != nil {
@@ -68,7 +68,7 @@ func TestIndex(t *testing.T) {
 	t.Logf("finished to build the index in %s", time.Since(sTime))
 
 	for _, s := range queries {
-		idx.Search(s.Seq.Seq, 10)
+		idx.Search(s.Seq.Seq, 11)
 	}
 
 }

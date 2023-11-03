@@ -20,15 +20,11 @@
 
 package tree
 
-import (
-	"sort"
-)
-
 // leafNode is used to represent a value
 type leafNode struct {
 	key uint64   // ALL the bases in the node, the k-mer
-	k   uint8    // lenght of bases of the key
 	val []uint64 // yes, multiple values
+	k   uint8    // lenght of bases of the key
 }
 
 // func (l leafNode) String() string {
@@ -37,8 +33,8 @@ type leafNode struct {
 
 // edge is used to represent an edge node
 type edge struct {
-	label uint8 // one base in 2-bit code
 	node  *node // the child node it connects to
+	label uint8 // one base in 2-bit code
 }
 
 // node represents a node in the tree, might be the root, inner or leaf node.
@@ -48,7 +44,8 @@ type node struct {
 	prefix uint64 // prefix of the current node
 	k      uint8  // bases length of the prefix
 
-	edges edges // need to be sorted for fast query
+	edgesNum uint8
+	edges    *[4]*edge // just use a array
 }
 
 // func (n node) String() string {
@@ -64,68 +61,33 @@ func (n *node) isLeaf() bool {
 	return n.leaf != nil
 }
 
-func (n *node) addEdge(e edge) {
-	num := len(n.edges)
-	idx := sort.Search(num, func(i int) bool { // find the position to insert
-		return n.edges[i].label >= e.label
-	})
-	n.edges = append(n.edges, edge{})
-	copy(n.edges[idx+1:], n.edges[idx:])
-	n.edges[idx] = e
+func (n *node) addEdge(e *edge) {
+	if n.edges == nil {
+		edges := [4]*edge{}
+		n.edges = &edges
+	}
+	n.edges[e.label] = e
+	n.edgesNum++
 }
 
 func (n *node) updateEdge(label uint8, node *node) {
-	num := len(n.edges)
-	idx := sort.Search(num, func(i int) bool {
-		return n.edges[i].label >= label
-	})
-	if idx < num && n.edges[idx].label == label {
-		n.edges[idx].node = node
-		return
-	}
-	panic("replacing missing edge")
+	n.edges[label].node = node
 }
 
 // actually, it returns the node that the edge connects to
 func (n *node) getEdge(label uint8) *node {
-	num := len(n.edges)
-	idx := sort.Search(num, func(i int) bool {
-		return n.edges[i].label >= label
-	})
-	if idx < num && n.edges[idx].label == label {
-		return n.edges[idx].node
+	if n.edges == nil {
+		return nil
 	}
-	return nil
+	if n.edges[label] == nil {
+		return nil
+	}
+	return n.edges[label].node
 }
 
 func (n *node) delEdge(label uint8) {
-	num := len(n.edges)
-	idx := sort.Search(num, func(i int) bool {
-		return n.edges[i].label >= label
-	})
-	if idx < num && n.edges[idx].label == label {
-		copy(n.edges[idx:], n.edges[idx+1:])
-		n.edges[len(n.edges)-1] = edge{}
-		n.edges = n.edges[:len(n.edges)-1]
-	}
-}
-
-type edges []edge
-
-func (e edges) Len() int {
-	return len(e)
-}
-
-func (e edges) Less(i, j int) bool {
-	return e[i].label < e[j].label
-}
-
-func (e edges) Swap(i, j int) {
-	e[i], e[j] = e[j], e[i]
-}
-
-func (e edges) Sort() {
-	sort.Sort(e)
+	n.edges[label] = nil
+	n.edgesNum--
 }
 
 // Tree is a radix tree for storing bit-packed k-mer information
@@ -184,7 +146,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 
 		// No edge, create one
 		if n == nil {
-			e := edge{
+			e := &edge{
 				label: KmerBaseAt(search, k, 0),
 				node: &node{
 					leaf: &leafNode{
@@ -219,7 +181,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		parent.updateEdge(KmerBaseAt(search, k, 0), child)
 
 		// Restore the existing node
-		child.addEdge(edge{
+		child.addEdge(&edge{
 			label: KmerBaseAt(n.prefix, n.k, commonPrefix),
 			node:  n,
 		})
@@ -242,7 +204,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		}
 
 		// Create a new edge for the node
-		child.addEdge(edge{
+		child.addEdge(&edge{
 			label: KmerBaseAt(search, k, 0),
 			node: &node{
 				leaf:   leaf,
@@ -411,10 +373,10 @@ func recursiveWalk(n *node, fn WalkFn) bool {
 	}
 
 	// Recurse on the children
-	i := 0
-	k := len(n.edges) // keeps track of number of edges in previous iteration
+	var i uint8
+	k := n.edgesNum // keeps track of number of edges in previous iteration
 	for i < k {
-		e := n.edges[i]
+		e := nthEdge(n.edges, i)
 		if recursiveWalk(e.node, fn) {
 			return true
 		}
@@ -422,16 +384,30 @@ func recursiveWalk(n *node, fn WalkFn) bool {
 		// iterating on. If there are no more edges, mergeChild happened,
 		// so the last edge became the current node n, on which we'll
 		// iterate one last time.
-		if len(n.edges) == 0 {
+		if n.edgesNum == 0 {
 			return recursiveWalk(n, fn)
 		}
 		// If there are now less edges than in the previous iteration,
 		// then do not increment the loop index, since the current index
 		// points to a new edge. Otherwise, get to the next index.
-		if len(n.edges) >= k {
+		if n.edgesNum >= k {
 			i++
 		}
-		k = len(n.edges)
+		k = n.edgesNum
 	}
 	return false
+}
+
+func nthEdge(edges *[4]*edge, n uint8) *edge {
+	var j uint8
+	for _, e := range *edges {
+		if e == nil {
+			continue
+		}
+		if j == n {
+			return e
+		}
+		j++
+	}
+	return nil
 }

@@ -22,6 +22,8 @@ package lexichash
 
 import (
 	"fmt"
+	"runtime"
+	"sync"
 
 	"github.com/shenwei356/kmers"
 	tree "github.com/shenwei356/lexichash/kmer-radix-tree"
@@ -71,19 +73,64 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 		return err
 	}
 
-	var loc int
-	var refpos uint64
-	k := uint8(idx.lh.K)
-	for i, kmer := range _kmers {
-		loc = locs[i]
+	if Threads == 1 {
+		var loc int
+		var refpos uint64
+		k := uint8(idx.lh.K)
+		for i, kmer := range _kmers {
+			loc = locs[i]
 
-		//  ref idx: 26 bits
-		//  pos:     36 bits
-		//  strand:   2 bits
-		refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+			//  ref idx: 26 bits
+			//  pos:     36 bits
+			//  strand:   2 bits
+			refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
 
-		idx.Trees[i].Insert(kmer>>2, k, refpos)
+			idx.Trees[i].Insert(kmer>>2, k, refpos)
+		}
+
+		idx.ids = append(idx.ids, id)
+		idx.i++
+
+		return nil
 	}
+
+	if Threads <= 0 {
+		Threads = runtime.NumCPU()
+	}
+
+	var wg sync.WaitGroup
+	tokens := make(chan int, Threads)
+
+	k := uint8(idx.lh.K)
+	nMasks := len(_kmers)
+	n := nMasks/Threads + 1
+	var start, end int
+	for j := 0; j <= Threads; j++ {
+		start, end = j*n, (j+1)*n
+		if end > nMasks {
+			end = nMasks
+		}
+
+		wg.Add(1)
+		tokens <- 1
+		go func(start, end int) {
+			var kmer uint64
+			var loc int
+			for i := start; i < end; i++ {
+				kmer = _kmers[i]
+				loc = locs[i]
+
+				//  ref idx: 26 bits
+				//  pos:     36 bits
+				//  strand:   2 bits
+				refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+				idx.Trees[i].Insert(kmer>>2, k, refpos)
+			}
+			wg.Done()
+			<-tokens
+		}(start, end)
+	}
+	wg.Wait()
 
 	idx.ids = append(idx.ids, id)
 	idx.i++
