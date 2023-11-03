@@ -23,6 +23,7 @@ package lexichash
 import (
 	"fmt"
 
+	"github.com/shenwei356/kmers"
 	tree "github.com/shenwei356/lexichash/kmer-radix-tree"
 )
 
@@ -33,7 +34,7 @@ type Index struct {
 	//  ref idx: 26 bits
 	//  pos:     36 bits
 	//  strand:   2 bits
-	trees []*tree.Tree
+	Trees []*tree.Tree
 
 	ids [][]byte // IDs
 	i   uint32   // curent index
@@ -57,7 +58,7 @@ func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
 
 	idx := &Index{
 		lh:    lh,
-		trees: trees,
+		Trees: trees,
 		ids:   make([][]byte, 0, 128),
 		i:     0,
 	}
@@ -81,7 +82,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 		//  strand:   2 bits
 		refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
 
-		idx.trees[i].Insert(kmer>>2, k, refpos)
+		idx.Trees[i].Insert(kmer>>2, k, refpos)
 	}
 
 	idx.ids = append(idx.ids, id)
@@ -90,29 +91,35 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 	return nil
 }
 
-func (idx *Index) Search(s []byte) error {
+func (idx *Index) Search(s []byte, m uint8) error {
 	_kmers, _, err := idx.lh.Mask(s)
 	if err != nil {
 		return err
 	}
 
-	// var _key uint64
-	// var _k uint8
-	var val []uint64
+	var srs []tree.SearchResult
+	var sr tree.SearchResult
 	var refpos uint64
 	var ok bool
-	k := uint8(idx.lh.K)
+	var i int
+	var kmer uint64
+	k := idx.lh.K
 
-	for i, kmer := range _kmers {
-
-		val, ok = idx.trees[i].Get(kmer>>2, k)
+	for i, kmer = range _kmers {
+		srs, ok = idx.Trees[i].Search(kmer>>2, uint8(k), m)
 		if !ok {
 			continue
 		}
 
-		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, idx.lh.K))
-		for _, refpos = range val {
-			fmt.Printf("  %s, %d, %c\n", idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
+		fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
+		for _, sr = range srs {
+			fmt.Printf("    %s %d\n",
+				kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
+				sr.LenPrefix)
+			for _, refpos = range sr.Values {
+				fmt.Printf("      %s, %d, %c\n",
+					idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
+			}
 		}
 	}
 

@@ -29,15 +29,23 @@ import (
 
 func TestIndex(t *testing.T) {
 	k := 31
-	nMasks := 100
+	nMasks := 200
 	idx, err := NewIndex(k, nMasks)
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	// s1 := []byte("ATGACTGCCATGGAGGAGTCACAGTCGGATATCAGCCTCGAGCTCCCTCTGAGCCAGGAGACATTTTCAGGCTTATGGAAACTACTTCCTCCAGAAGATA")
-	// s2 := []byte("ATGACTGCCATGGAGGAGTCACAGcCGGATATCAGCCTtGAGCTTGAGCCAGGAGgCATTTTCAGGCTTATGGAAACTACTTCCTCCAGAcGATA")
-	// s3 := []byte("ATGACTGCCATGGAcGAGTCACAGaCGGAcATCAGCCTcGAGCTTGAGCCAGGAGcCATTTTCAGGCcTATGGAAACTaCTTCCTCCAGAcGATA")
+
+	queries, err := fastx.GetSeqs("tests/hairpin.query.fasta", nil, 8, 100, "")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if len(queries) == 0 {
+		t.Error(err)
+		return
+	}
+	// queryID := queries[0].ID
 
 	seqs, err := fastx.GetSeqs("tests/hairpin.fasta", nil, 8, 100, "")
 	if err != nil {
@@ -48,18 +56,19 @@ func TestIndex(t *testing.T) {
 	sTime := time.Now()
 	t.Logf("starting to build the index ...")
 	for _, s := range seqs {
-		// fmt.Printf("inserting seq: %d/%d\n", i+1, len(seqs))
+		// if bytes.Equal(s.ID, queryID) { //skip the query sequence
+		// 	continue
+		// }
 		idx.Insert(s.ID, s.Seq.Seq)
 	}
+	// fmt.Printf("number of elements in trees:\n")
+	// for i, tree := range idx.Trees {
+	// 	fmt.Printf("tree #%d: %d\n", i, tree.Len())
+	// }
 	t.Logf("finished to build the index in %s", time.Since(sTime))
 
-	queries, err := fastx.GetSeqs("tests/hairpin.query.fasta", nil, 8, 100, "")
-	if err != nil {
-		t.Error(err)
-		return
-	}
 	for _, s := range queries {
-		idx.Search(s.Seq.Seq)
+		idx.Search(s.Seq.Seq, 10)
 	}
 
 }
