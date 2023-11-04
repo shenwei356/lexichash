@@ -30,7 +30,8 @@ func Kmer2dna(code uint64, k int) []byte {
 	return kmers.Decode(code, k)
 }
 
-var strands = [2]byte{'+', '-'}
+// Strands could be used to output strand for a reverse complement flag
+var Strands = [2]byte{'+', '-'}
 
 // https://gist.github.com/badboy/6267743 .
 // version with mask: https://gist.github.com/lh3/974ced188be2f90422cc .

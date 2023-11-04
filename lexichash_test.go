@@ -48,7 +48,6 @@ func TestHash(t *testing.T) {
 
 	s1 := []byte("AGAAGGACGTGGACGTGGATGCCGATAAGAAGGAGCCGTAAGGTACCGGGCGTGGGGAGGGCAGGGGCAGGGACGGGGATCAGGGGCAGCTGATCCCCGT")
 	s2 := []byte("AGAAGGACGTGGACGTGGATcCCGATAAGAAGGAcGCCGTAAGGTACCaGGCGTGGGGAGGGCAGGGGaAGGGACGGGGATCAGGGGCAGaTGATCCCCGT")
-	// s2 := []byte("TATCgTCTGGAGGAAGTAGTTTCCATAAGCCTGAAAATGcCTCCTGGCTCAAGCTCaAGGCTGATATCCGgCTGTGACTCCTCCATGGCAGTCAT")
 
 	minLen := 13
 	subs, err := lh.Compare(s2, s1, minLen)
@@ -60,8 +59,8 @@ func TestHash(t *testing.T) {
 	t.Logf("(location in s1) vs (location in s2) len(substring) substring")
 	for _, sub := range subs {
 		t.Logf("(%3d,%3d, %c) vs (%3d,%3d, %c)  %3d %s\n",
-			sub[2]>>2+1, sub[2]>>2+sub[1], strands[sub[2]&1],
-			sub[3]>>2+1, sub[3]>>2+sub[1], strands[sub[3]&1],
+			sub[2]>>2+1, sub[2]>>2+sub[1], Strands[sub[2]&1],
+			sub[3]>>2+1, sub[3]>>2+sub[1], Strands[sub[3]&1],
 			sub[1], Kmer2dna(sub[0], int(sub[1])))
 	}
 
@@ -85,8 +84,8 @@ func TestHash(t *testing.T) {
 		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 		for _, v := range r.Subs[0:] {
 			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-				v[0].Begin+1, v[0].End, strands[v[0].RC],
-				v[1].Begin+1, v[1].End, strands[v[1].RC],
+				v[0].Begin+1, v[0].End, Strands[v[0].RC],
+				v[1].Begin+1, v[1].End, Strands[v[1].RC],
 				v[0].K, v[0].KmerCode)
 		}
 	}
