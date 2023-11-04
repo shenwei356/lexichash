@@ -31,7 +31,10 @@ import (
 func TestIndex(t *testing.T) {
 	k := 21
 	nMasks := 1000
-	idx, err := NewIndexWithSeed(k, nMasks, 11)
+	cannonical := false
+	var seed int64 = 1
+
+	idx, err := NewIndexWithSeed(k, nMasks, cannonical, seed)
 	if err != nil {
 		t.Error(err)
 		return
@@ -65,8 +68,10 @@ func TestIndex(t *testing.T) {
 	t.Logf("finished to build the index in %s from %d sequences with %d masks",
 		time.Since(sTime), len(seqs), nMasks)
 
+	minLen := 13
+
 	for _, s := range queries {
-		sr, err := idx.Search(s.Seq.Seq, 12)
+		sr, err := idx.Search(s.Seq.Seq, uint8(minLen))
 		if err != nil {
 			t.Log(err)
 			return
@@ -80,12 +85,27 @@ func TestIndex(t *testing.T) {
 		for i, r := range sr {
 			t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 			for _, v := range r.Subs[0:] {
-				t.Logf("     k:%d %s (%d-%d,%v) vs (%d-%d,%v)\n",
-					v[0].K, v[0].KmerCode,
-					v[0].Begin+1, v[0].End, v[0].RC,
-					v[1].Begin+1, v[1].End, v[1].RC)
+				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
+					v[0].Begin+1, v[0].End, strands[v[0].RC],
+					v[1].Begin+1, v[1].End, strands[v[1].RC],
+					v[0].K, v[0].KmerCode)
 			}
 		}
 	}
 
+	// _queries := []string{
+	// 	"GGCGTGGGGAGGGCAGGGG",
+	// 	"CCGATAAGAAGGA",
+	// 	"CTGCCCCTGATCCCCGTCCCT",
+	// 	"CTGCCCCTGATCC",
+	// 	"CTGCCCCTGA",
+	// }
+	// for _, query := range _queries {
+	// 	code, _ := kmers.Encode([]byte(query))
+	// 	t.Log()
+	// 	t.Logf("path of %s\n", query)
+	// 	for _, path := range idx.Paths(code, uint8(len(query)), len(query)) {
+	// 		t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(path.Nodes, "->"))
+	// 	}
+	// }
 }

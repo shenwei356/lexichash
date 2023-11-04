@@ -21,28 +21,37 @@
 package lexichash
 
 import (
+	"strconv"
 	"testing"
 )
 
 func TestHash(t *testing.T) {
-	k := 31
+	k := 21
 	nMasks := 1000
-	lh, err := New(k, nMasks)
+	cannonical := false
+	var seed int64 = 1
+
+	lh, err := NewWithSeed(k, nMasks, cannonical, seed)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
 	// t.Logf("masks:")
+	// var d int
+	// var p uint64
 	// for i, mask := range lh.Masks {
-	// 	t.Logf("  %d %s %b\n", i+1, Kmer2dna(mask, k), mask)
+	// 	d = bits.OnesCount64(mask ^ p)
+	// 	t.Logf("  %3d %s %2d %42b\n", i+1, Kmer2dna(mask, k), d, mask)
+	// 	p = mask
 	// }
 
-	s1 := []byte("ATGACTGCCATGGAGGAGTCACAGTCGGATATCAGCCTCGAGCTCCCTCTGAGCCAGGAGACATTTTCAGGCTTATGGAAACTACTTCCTCCAGAAGATA")
-	s2 := []byte("ATGACTGCCATGGAGGAGTCACAGcCGGATATCAGCCTtGAGCTTGAGCCAGGAGgCATTTTCAGGCTTATGGAAACTACTTCCTCCAGAcGATA")
+	s1 := []byte("AGAAGGACGTGGACGTGGATGCCGATAAGAAGGAGCCGTAAGGTACCGGGCGTGGGGAGGGCAGGGGCAGGGACGGGGATCAGGGGCAGCTGATCCCCGT")
+	s2 := []byte("AGAAGGACGTGGACGTGGATcCCGATAAGAAGGAcGCCGTAAGGTACCaGGCGTGGGGAGGGCAGGGGaAGGGACGGGGATCAGGGGCAGaTGATCCCCGT")
 	// s2 := []byte("TATCgTCTGGAGGAAGTAGTTTCCATAAGCCTGAAAATGcCTCCTGGCTCAAGCTCaAGGCTGATATCCGgCTGTGACTCCTCCATGGCAGTCAT")
 
-	subs, err := lh.Compare(s1, s2, 5)
+	minLen := 13
+	subs, err := lh.Compare(s2, s1, minLen)
 	if err != nil {
 		t.Error(err)
 		return
@@ -54,5 +63,31 @@ func TestHash(t *testing.T) {
 			sub[2]>>2+1, sub[2]>>2+sub[1], strands[sub[2]&1],
 			sub[3]>>2+1, sub[3]>>2+sub[1], strands[sub[3]&1],
 			sub[1], Kmer2dna(sub[0], int(sub[1])))
+	}
+
+	// use the same sequence to build the index
+
+	idx, err := NewIndexWithSeed(k, nMasks, cannonical, seed)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	idx.Insert([]byte("s1"), s1)
+
+	sr, err := idx.Search(s2, uint8(minLen))
+	if err != nil {
+		t.Log(err)
+		return
+	}
+	t.Log()
+	t.Logf("query: %s", "s2")
+	for i, r := range sr {
+		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
+		for _, v := range r.Subs[0:] {
+			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
+				v[0].Begin+1, v[0].End, strands[v[0].RC],
+				v[1].Begin+1, v[1].End, strands[v[1].RC],
+				v[0].K, v[0].KmerCode)
+		}
 	}
 }

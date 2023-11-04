@@ -57,12 +57,18 @@ type LexicHash struct {
 }
 
 // New returns a new LexicHash object.
-func New(k int, nMasks int) (*LexicHash, error) {
-	return NewWithSeed(k, nMasks, 1)
+// nMasks >= 1000 is recommended.
+// Setting canonicalKmer to true is recommended,
+// cause it would produces more results.
+func New(k int, nMasks int, canonicalKmer bool) (*LexicHash, error) {
+	return NewWithSeed(k, nMasks, canonicalKmer, 1)
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
-func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
+// nMasks >= 1000 is recommended.
+// Setting canonicalKmer to true is recommended,
+// cause it would produces more results.
+func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash, error) {
 	if k < 4 || k > 31 {
 		return nil, ErrKOverflow
 	}
@@ -70,12 +76,12 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 		return nil, ErrInsufficientMasks
 	}
 
-	lh := &LexicHash{K: k, Seed: seed, canonical: true}
+	lh := &LexicHash{K: k, Seed: seed, canonical: canonicalKmer}
 
 	// ------------ generate masks ------------
 
 	// generate more masks in case there are some duplicated masks
-	n := int(float64(nMasks) * 1.1)
+	n := int(float64(nMasks) * 1.2)
 	masks := make([]uint64, n)
 
 	r := rand.New(rand.NewSource(seed))
@@ -248,7 +254,8 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locs *[]int) {
 //
 //  1. the list of the most similar k-mers for each mask, with the last 2 bits a strand
 //     flag (1 for negative strand)
-//  2. the start positions of all k-mers
+//  2. the start positions of all k-mers.
+//     if k-mer comes from multiple locations, only the smaller one is kept.
 func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
@@ -260,10 +267,10 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 	}
 
 	var masks = lh.Masks
-	// kmers := make([]uint64, len(masks)) // matched k-mers
+	// _kmers := make([]uint64, len(masks)) // matched k-mers
 	// hashes := make([]uint64, len(masks)) // hashes of matched k-mers
 	// locs := make([]int, len(masks))     // locations of the matched k-mers
-	kmers := lh.poolKmers.Get().(*[]uint64)
+	_kmers := lh.poolKmers.Get().(*[]uint64)
 	locs := lh.poolLocs.Get().(*[]int)
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
 	for i := range *hashes {
@@ -286,17 +293,17 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 
 			for i, mask = range masks {
 				hash = kmer[0]>>2 ^ mask
-				if hash < (*hashes)[i] ||
-					(hash == (*hashes)[i] && j < (*locs)[i]) {
+				// smaller hash
+				if hash < (*hashes)[i] {
 					(*hashes)[i] = hash
-					(*kmers)[i] = kmer[0]
+					(*_kmers)[i] = kmer[0]
 					(*locs)[i] = j
 				}
 			}
 		}
 
 		lh.poolHashes.Put(hashes)
-		return kmers, locs, nil
+		return _kmers, locs, nil
 	}
 
 	for {
@@ -308,25 +315,24 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 
 		for i, mask = range masks {
 			hash = kmer[0]>>2 ^ mask
-			if hash < (*hashes)[i] ||
-				(hash == (*hashes)[i] && j < (*locs)[i]) {
+			// smaller hash
+			if hash < (*hashes)[i] {
 				(*hashes)[i] = hash
-				(*kmers)[i] = kmer[0]
+				(*_kmers)[i] = kmer[0]
 				(*locs)[i] = j
 			}
 
 			// try both strands
-
 			hash = kmer[1]>>2 ^ mask
-			if hash < (*hashes)[i] ||
-				(hash == (*hashes)[i] && j < (*locs)[i]) {
+			// smaller hash
+			if hash < (*hashes)[i] {
 				(*hashes)[i] = hash
-				(*kmers)[i] = kmer[1]
+				(*_kmers)[i] = kmer[1]
 				(*locs)[i] = j
 			}
 		}
 	}
 
 	lh.poolHashes.Put(hashes)
-	return kmers, locs, nil
+	return _kmers, locs, nil
 }

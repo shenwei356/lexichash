@@ -21,6 +21,7 @@
 package tree
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/shenwei356/kmers"
@@ -49,8 +50,8 @@ func TestTree(t *testing.T) {
 	n = uint64(1 << (k * 2))
 
 	for i = 0; i < n; i++ {
-		v = i & 3
-		if v == 1 || v == 2 {
+		v = (i >> 4) & 3
+		if v == 3 {
 			continue
 		}
 		_, _ = tree.Insert(i, uint8(k), v)
@@ -83,4 +84,9 @@ func TestTree(t *testing.T) {
 		t.Logf("  %s, len(prefix): %d, %v\n",
 			kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
 	}
+
+	query = "ACGT"
+	code, _ = kmers.Encode([]byte(query))
+	nodes, bases := tree.Path(code, uint8(len(query)))
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
 }

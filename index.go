@@ -46,13 +46,19 @@ type Index struct {
 }
 
 // NewIndex ceates a new Index.
-func NewIndex(k int, nMasks int) (*Index, error) {
-	return NewIndexWithSeed(k, nMasks, 1)
+// nMasks >= 1000 is recommended.
+// Setting canonicalKmer to true is recommended,
+// cause it would produces more results.
+func NewIndex(k int, nMasks int, canonicalKmer bool) (*Index, error) {
+	return NewIndexWithSeed(k, nMasks, canonicalKmer, 1)
 }
 
 // NewIndexWithSeed ceates a new Index with given seed.
-func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
-	lh, err := NewWithSeed(k, nMasks, seed)
+// nMasks >= 1000 is recommended.
+// Setting canonicalKmer to true is recommended,
+// cause it would produces more results.
+func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index, error) {
+	lh, err := NewWithSeed(k, nMasks, canonicalKmer, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -152,9 +158,9 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 type Substr struct {
 	kmers.KmerCode // save substring in KmerCode
 
-	Begin int  // start position of the substring
-	End   int  // end position of the substring
-	RC    bool // is the substring from the negative strand
+	Begin int   // start position of the substring
+	End   int   // end position of the substring
+	RC    uint8 // a flag indicating if the substring from the negative strand (1 for yes)
 }
 
 // Equal tells if two Substr are the same.
@@ -163,7 +169,7 @@ func (s Substr) Equal(b Substr) bool {
 }
 
 func (s Substr) String() string {
-	return fmt.Sprintf("%s %d-%d rc: %v", s.KmerCode.String(), s.Begin, s.End, s.RC)
+	return fmt.Sprintf("%s %d-%d rc: %d", s.KmerCode.String(), s.Begin, s.End, s.RC)
 }
 
 // SearchResult stores a search result for the given query sequence.
@@ -206,10 +212,10 @@ func (r *SearchResult) Deduplicate() {
 	}
 
 	sort.Slice(r.Subs, func(i, j int) bool {
-		if r.Subs[i][1].Begin == r.Subs[j][1].Begin {
-			return r.Subs[i][1].End > r.Subs[j][1].End
+		if r.Subs[i][0].Begin == r.Subs[j][0].Begin {
+			return r.Subs[i][0].End > r.Subs[j][0].End
 		}
-		return r.Subs[i][1].Begin < r.Subs[j][1].Begin
+		return r.Subs[i][0].Begin < r.Subs[j][0].Begin
 	})
 
 	var i, j int
@@ -218,7 +224,8 @@ func (r *SearchResult) Deduplicate() {
 	p = r.Subs[0]
 	for i = 1; i < len(r.Subs); i++ {
 		v = r.Subs[i]
-		if v[1].Equal(p[1]) || v[1].End <= p[1].End { // the same or nested
+		if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
+			v[0].End <= p[0].End { // or nested region
 			if !flag {
 				j = i // mark insertion position
 				flag = true
@@ -261,12 +268,12 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 	var _code uint64
 	var _pos int
 	var _begin, _end int
-	var _rc bool
+	var _rc uint8
 
 	var code uint64
 	var K, _k int
 	var idIdx, pos, begin, end int
-	var rc bool
+	var rc uint8
 	var r *SearchResult
 	for i, kmer = range *_kmers {
 		srs, ok = idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
@@ -276,7 +283,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 
 		// queyr substring
 		_pos = (*_locs)[i]
-		_rc = kmer&1 > 0
+		_rc = uint8(kmer & 1)
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
 		for _, sr = range srs {
@@ -288,7 +295,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 			_k = int(sr.LenPrefix)
 
 			// query
-			if _rc {
+			if _rc > 0 {
 				_begin, _end = _pos+K-_k, _pos+K
 			} else {
 				_begin, _end = _pos, _pos+_k
@@ -304,9 +311,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 
 				idIdx = int(refpos >> 38)
 				pos = int(refpos << 26 >> 28)
-				rc = refpos&1 > 0
+				rc = uint8(refpos & 1)
 
-				if rc {
+				if rc > 0 {
 					begin, end = pos+K-_k, pos+K
 				} else {
 					begin, end = pos, pos+_k
@@ -343,4 +350,25 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 	})
 
 	return rs, nil
+}
+
+// Path represents the path of query in a tree
+type Path struct {
+	TreeIdx int
+	Nodes   []string
+	Bases   int
+}
+
+// Paths returned the paths in all trees
+func (idx *Index) Paths(key uint64, k uint8, minPrefix int) []Path {
+	var bases int
+	paths := make([]Path, 0, 8)
+	for i, tree := range idx.Trees {
+		var nodes []string
+		nodes, bases = tree.Path(key, uint8(k))
+		if bases >= minPrefix {
+			paths = append(paths, Path{TreeIdx: i, Nodes: nodes, Bases: bases})
+		}
+	}
+	return paths
 }

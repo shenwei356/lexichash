@@ -20,6 +20,10 @@
 
 package tree
 
+import (
+	"github.com/shenwei356/kmers"
+)
+
 // leafNode is used to represent a value
 type leafNode struct {
 	key uint64   // ALL the bases in the node, the k-mer
@@ -247,6 +251,42 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 	return nil, false
 }
 
+// Path returns the path of a key, i.e., the nodes list.
+// and the number of visited/matched bases.
+func (t *Tree) Path(key uint64, k uint8) ([]string, int) {
+	n := t.root
+	search := key
+	nodes := make([]string, 0, k)
+	var matched int
+	for {
+		// Check for key exhaution
+		if k == 0 {
+			if n.isLeaf() {
+				nodes = append(nodes, string(kmers.Decode(n.leaf.key, int(n.leaf.k))))
+				return nodes, matched
+			}
+			break
+		}
+
+		// Look for an edge
+		n = n.getEdge(KmerBaseAt(search, k, 0))
+		if n == nil { // not found
+			break
+		}
+
+		// Consume the search prefix
+		if KmerHasPrefix(search, n.prefix, k, n.k) {
+			matched += int(n.k)
+			nodes = append(nodes, string(kmers.Decode(n.prefix, int(n.k))))
+			search = KmerSuffix(search, k, n.k)
+			k = k - n.k
+		} else {
+			break
+		}
+	}
+	return nodes, matched
+}
+
 // SearchResult records information of a search result
 type SearchResult struct {
 	Kmer      uint64   // kmer
@@ -293,6 +333,18 @@ func (t *Tree) Search(key uint64, k uint8, m uint8) ([]SearchResult, bool) {
 			search = KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
+			// also check the prefix, because the prefix of some nodes
+			// might be very long. Only checking prefix will ignore theses.
+			// For example, the strings below shared 4 bases,
+			// the third node would be this case.
+			//   A C AGCT
+			//   A C AGGC
+			lenPrefix += KmerLongestPrefix(search, n.prefix, k, n.k)
+			if lenPrefix >= m {
+				target = n
+				break
+			}
+
 			break
 		}
 	}
