@@ -155,7 +155,7 @@ type Substr struct {
 
 // Equal tells if two Substr are the same.
 func (s Substr) Equal(b Substr) bool {
-	return s.K == b.K && s.Code == b.Code && s.Begin == b.Begin
+	return s.K == b.K && s.Code == b.Code && s.Begin == b.Begin && s.RC == b.RC
 }
 
 func (s Substr) String() string {

@@ -29,6 +29,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/shenwei356/kmers"
 	iterater "github.com/shenwei356/lexichash/kmer-iterator"
 )
 
@@ -44,6 +45,8 @@ type LexicHash struct {
 
 	Seed  int64    // seed for generating masks
 	Masks []uint64 // masks
+
+	canonical bool
 }
 
 // New returns a new LexicHash object.
@@ -60,7 +63,7 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 		return nil, ErrInsufficientMasks
 	}
 
-	lh := &LexicHash{K: k, Seed: seed}
+	lh := &LexicHash{K: k, Seed: seed, canonical: true}
 
 	// ------------ generate masks ------------
 
@@ -70,8 +73,17 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 
 	r := rand.New(rand.NewSource(seed))
 	shift := 64 - k*2
+	var mask, mask_rc uint64
 	for i := range masks {
-		masks[i] = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
+		mask = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
+		masks[i] = mask
+
+		if lh.canonical {
+			mask_rc = kmers.MustRevComp(mask, k)
+			if mask_rc < mask {
+				masks[i] = mask_rc
+			}
+		}
 	}
 
 	uniqUint64s(&masks) // remove duplicates
@@ -205,7 +217,7 @@ func (lh *LexicHash) Mask(s []byte) ([]uint64, []int, error) {
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	// this one only supports k<=31, with the last two bits as a flag
 	// for marking if the k-mer is from the negative strand.
-	iter, err := iterater.NewKmerIterator(s, lh.K, false)
+	iter, err := iterater.NewKmerIterator(s, lh.K, lh.canonical)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -218,29 +230,61 @@ func (lh *LexicHash) Mask(s []byte) ([]uint64, []int, error) {
 		hashes[i] = math.MaxUint64
 	}
 
-	var kmer, mask, hash uint64
+	var mask, hash uint64
+	var kmer [2]uint64
 	var ok bool
-	var i int
+	var i, j int
+	canonical := lh.canonical
+
+	if canonical {
+		for {
+			kmer, ok, _ = iter.NextKmer()
+			if !ok {
+				break
+			}
+			j = iter.Index()
+
+			for i, mask = range masks {
+				hash = kmer[0]>>2 ^ mask
+				if hash < hashes[i] ||
+					(hash == hashes[i] && j < locs[i]) {
+					hashes[i] = hash
+					kmers[i] = kmer[0]
+					locs[i] = j
+				}
+			}
+		}
+
+		return kmers, locs, nil
+	}
 
 	for {
 		kmer, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
+		j = iter.Index()
 
 		for i, mask = range masks {
-			hash = kmer>>2 ^ mask
-			if hash < hashes[i] {
+			hash = kmer[0]>>2 ^ mask
+			if hash < hashes[i] ||
+				(hash == hashes[i] && j < locs[i]) {
 				hashes[i] = hash
-				kmers[i] = kmer
-				locs[i] = iter.Index()
+				kmers[i] = kmer[0]
+				locs[i] = j
+			}
+
+			// try both strands
+
+			hash = kmer[1]>>2 ^ mask
+			if hash < hashes[i] ||
+				(hash == hashes[i] && j < locs[i]) {
+				hashes[i] = hash
+				kmers[i] = kmer[1]
+				locs[i] = j
 			}
 		}
 	}
-
-	// for i, kmer := range kmers {
-	// 	fmt.Printf("%d %s %d\n", i, Kmer2dna(kmer, lh.K), locs[i])
-	// }
 
 	return kmers, locs, nil
 }
