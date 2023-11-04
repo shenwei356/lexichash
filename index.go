@@ -72,19 +72,23 @@ func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
 	return idx, nil
 }
 
+// Threads is the maximum concurrency number for Insert().
+var Threads = runtime.NumCPU()
+
 // Insert adds a new reference sequence to the index
 func (idx *Index) Insert(id []byte, s []byte) error {
 	_kmers, locs, err := idx.lh.Mask(s)
 	if err != nil {
 		return err
 	}
+	defer idx.lh.RecycleMaskResult(_kmers, locs)
 
 	if Threads == 1 {
 		var loc int
 		var refpos uint64
 		k := uint8(idx.lh.K)
-		for i, kmer := range _kmers {
-			loc = locs[i]
+		for i, kmer := range *_kmers {
+			loc = (*locs)[i]
 
 			//  ref idx: 26 bits
 			//  pos:     36 bits
@@ -108,7 +112,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 	tokens := make(chan int, Threads)
 
 	k := uint8(idx.lh.K)
-	nMasks := len(_kmers)
+	nMasks := len(*_kmers)
 	n := nMasks/Threads + 1
 	var start, end int
 	for j := 0; j <= Threads; j++ {
@@ -123,8 +127,8 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 			var kmer uint64
 			var loc int
 			for i := start; i < end; i++ {
-				kmer = _kmers[i]
-				loc = locs[i]
+				kmer = (*_kmers)[i]
+				loc = (*locs)[i]
 
 				//  ref idx: 26 bits
 				//  pos:     36 bits
@@ -241,6 +245,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer idx.lh.RecycleMaskResult(_kmers, _locs)
 
 	var srs []tree.SearchResult
 	var sr tree.SearchResult
@@ -263,14 +268,14 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 	var idIdx, pos, begin, end int
 	var rc bool
 	var r *SearchResult
-	for i, kmer = range _kmers {
+	for i, kmer = range *_kmers {
 		srs, ok = idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
 		if !ok {
 			continue
 		}
 
 		// queyr substring
-		_pos = _locs[i]
+		_pos = (*_locs)[i]
 		_rc = kmer&1 > 0
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))

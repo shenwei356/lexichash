@@ -48,6 +48,7 @@ func TestHash(t *testing.T) {
 		return
 	}
 
+	t.Logf("(location in s1) vs (location in s2) len(substring) substring")
 	for _, sub := range subs {
 		t.Logf("(%3d,%3d, %c) vs (%3d,%3d, %c)  %3d %s\n",
 			sub[2]>>2+1, sub[2]>>2+sub[1], strands[sub[2]&1],

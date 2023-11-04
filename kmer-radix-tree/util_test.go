@@ -37,7 +37,7 @@ func parseKmer(s string) ([]byte, uint64, uint8) {
 func TestKmerOperations(t *testing.T) {
 	kmer, code, k := parseKmer("ACTGACCTGC")
 
-	prefix1, p1, k1 := parseKmer("ACTGAC")
+	prefix1, p1, k1 := parseKmer("ACTGCA")
 	prefix2, p2, k2 := parseKmer("ACTGC")
 
 	// KmerBaseAt
@@ -69,8 +69,8 @@ func TestKmerOperations(t *testing.T) {
 
 	// KmerLongestPrefix
 	n := KmerLongestPrefix(p1, p2, k1, k2)
-	if n != 4 {
-		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 4, n)
+	if n != 5 {
+		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 5, n)
 	}
 
 	// KmerHasPrefix

@@ -66,7 +66,7 @@ func TestIndex(t *testing.T) {
 		time.Since(sTime), len(seqs), nMasks)
 
 	for _, s := range queries {
-		sr, err := idx.Search(s.Seq.Seq, 11)
+		sr, err := idx.Search(s.Seq.Seq, 12)
 		if err != nil {
 			t.Log(err)
 			return
