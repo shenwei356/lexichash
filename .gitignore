@@ -21,7 +21,9 @@
 *.pprof
 
 cmd/binaries/*
+cmd/lexic-hash-search
 
 # data
 t_*
 t.gz
+t.*

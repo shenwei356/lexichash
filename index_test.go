@@ -76,21 +76,22 @@ func TestIndex(t *testing.T) {
 			t.Log(err)
 			return
 		}
-		t.Log()
-		t.Logf("query: %s, targets: %d\n", s.ID, len(sr))
 		if sr == nil {
 			continue
 		}
+		t.Log()
+		t.Logf("query: %s, targets: %d\n", s.ID, len(*sr))
 
-		for i, r := range sr {
+		for i, r := range *sr {
 			t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
-			for _, v := range r.Subs {
+			for _, v := range *r.Subs {
 				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 					v[0].Begin+1, v[0].End, Strands[v[0].RC],
 					v[1].Begin+1, v[1].End, Strands[v[1].RC],
 					v[0].K, v[0].KmerCode)
 			}
 		}
+		idx.RecycleSearchResult(sr)
 	}
 
 	// _queries := []string{

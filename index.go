@@ -43,6 +43,7 @@ type Index struct {
 
 	IDs [][]byte // IDs of the reference genomes
 	i   uint32   // curent index, for inserting a new ref seq
+
 }
 
 // NewIndex ceates a new Index.
@@ -75,6 +76,7 @@ func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index
 		IDs:   make([][]byte, 0, 128),
 		i:     0,
 	}
+
 	return idx, nil
 }
 
@@ -172,11 +174,25 @@ func (s Substr) String() string {
 	return fmt.Sprintf("%s %d-%d rc: %d", s.KmerCode.String(), s.Begin, s.End, s.RC)
 }
 
+var pool2Subtr = &sync.Pool{New: func() interface{} {
+	return &[2]Substr{}
+}}
+
+var poolSubs = &sync.Pool{New: func() interface{} {
+	tmp := make([]*[2]Substr, 0, 128)
+	return &tmp
+}}
+
+var poolSearchResults = &sync.Pool{New: func() interface{} {
+	tmp := make([]*SearchResult, 0, 128)
+	return &tmp
+}}
+
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
-	IdIdx int         // index of the matched reference ID
-	score float64     // score for sorting
-	Subs  [][2]Substr // matched substring pairs (query,target)
+	IdIdx int           // index of the matched reference ID
+	score float64       // score for sorting
+	Subs  *[]*[2]Substr // matched substring pairs (query,target)
 
 	scoring bool // is score computed
 	cleaned bool // is duplicates removed
@@ -196,7 +212,7 @@ func (r *SearchResult) Score() float64 {
 		r.Deduplicate()
 	}
 
-	for _, v := range r.Subs {
+	for _, v := range *r.Subs {
 		r.score += float64(v[0].K)
 	}
 
@@ -206,24 +222,24 @@ func (r *SearchResult) Score() float64 {
 
 // Deduplicate removes duplicated substrings
 func (r *SearchResult) Deduplicate() {
-	if len(r.Subs) == 1 {
+	if len(*r.Subs) == 1 {
 		r.cleaned = true
 		return
 	}
 
-	sort.Slice(r.Subs, func(i, j int) bool {
-		if r.Subs[i][0].Begin == r.Subs[j][0].Begin {
-			return r.Subs[i][0].End > r.Subs[j][0].End
+	sort.Slice(*r.Subs, func(i, j int) bool {
+		if (*r.Subs)[i][0].Begin == (*r.Subs)[j][0].Begin {
+			return (*r.Subs)[i][0].End > (*r.Subs)[j][0].End
 		}
-		return r.Subs[i][0].Begin < r.Subs[j][0].Begin
+		return (*r.Subs)[i][0].Begin < (*r.Subs)[j][0].Begin
 	})
 
 	var i, j int
-	var p, v [2]Substr
+	var p, v *[2]Substr
 	var flag bool
-	p = r.Subs[0]
-	for i = 1; i < len(r.Subs); i++ {
-		v = r.Subs[i]
+	p = (*r.Subs)[0]
+	for i = 1; i < len(*r.Subs); i++ {
+		v = (*r.Subs)[i]
 		if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
 			v[0].End <= p[0].End { // or nested region
 			if !flag {
@@ -234,28 +250,42 @@ func (r *SearchResult) Deduplicate() {
 		}
 
 		if flag { // need to insert to previous position
-			r.Subs[j] = v
+			pool2Subtr.Put((*r.Subs)[j])
+			(*r.Subs)[j] = v
 			j++
 		}
 		p = v
 	}
 	if j > 0 {
-		r.Subs = r.Subs[:j]
+		*r.Subs = (*r.Subs)[:j]
 	}
 
 	r.cleaned = true
 }
 
-// Search queries the index with a sequence
-func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
+// RecycleSearchResult recycle search results objects
+func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
+	var v *[2]Substr
+	for _, r := range *sr {
+		for _, v = range *r.Subs {
+			pool2Subtr.Put(v)
+		}
+		poolSubs.Put(r.Subs)
+	}
+	poolSearchResults.Put(sr)
+}
+
+// Search queries the index with a sequence.
+// After using the result, do not forget to call RecycleSearchResult()
+func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	_kmers, _locs, err := idx.lh.Mask(s)
 	if err != nil {
 		return nil, err
 	}
 	defer idx.lh.RecycleMaskResult(_kmers, _locs)
 
-	var srs []tree.SearchResult
-	var sr tree.SearchResult
+	var srs *[]*tree.SearchResult
+	var sr *tree.SearchResult
 	var refpos uint64
 	var ok bool
 	var i int
@@ -275,6 +305,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 	var idIdx, pos, begin, end int
 	var rc uint8
 	var r *SearchResult
+	var subs *[]*[2]Substr
+	var _sub2 *[2]Substr
 	for i, kmer = range *_kmers {
 		srs, ok = idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
 		if !ok {
@@ -286,7 +318,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 		_rc = uint8(kmer & 1)
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
-		for _, sr = range srs {
+		for _, sr = range *srs {
 			// fmt.Printf("    %s %d\n",
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
 			// 	sr.LenPrefix)
@@ -319,34 +351,52 @@ func (idx *Index) Search(s []byte, minPrefix uint8) ([]*SearchResult, error) {
 					begin, end = pos, pos+_k
 				}
 
+				_sub2 = pool2Subtr.Get().(*[2]Substr)
+				(*_sub2)[0].Code = _code
+				(*_sub2)[0].K = _k
+				(*_sub2)[0].Begin = _begin
+				(*_sub2)[0].End = _end
+				(*_sub2)[0].RC = _rc
+
+				(*_sub2)[1].Code = code
+				(*_sub2)[1].K = _k
+				(*_sub2)[1].Begin = begin
+				(*_sub2)[1].End = end
+				(*_sub2)[1].RC = rc
+
 				if r, ok = m[idIdx]; !ok {
+					subs = poolSubs.Get().(*[]*[2]Substr)
+					*subs = (*subs)[:0]
+
 					r = &SearchResult{
 						IdIdx: idIdx,
-						Subs: [][2]Substr{{
-							{kmers.KmerCode{Code: _code, K: _k}, _begin, _end, _rc},
-							{kmers.KmerCode{Code: code, K: _k}, begin, end, rc},
-						}},
+						// Subs: [][2]Substr{{
+						// 	{kmers.KmerCode{Code: _code, K: _k}, _begin, _end, _rc},
+						// 	{kmers.KmerCode{Code: code, K: _k}, begin, end, rc},
+						// }},
+						Subs: subs,
 					}
 					m[idIdx] = r
-				} else {
-					r.Subs = append(r.Subs, [2]Substr{
-						{kmers.KmerCode{Code: _code, K: _k}, _begin, _end, _rc},
-						{kmers.KmerCode{Code: code, K: _k}, begin, end, rc},
-					})
 				}
+
+				*r.Subs = append(*r.Subs, _sub2)
+
 				// fmt.Println(r)
 			}
 		}
+
+		idx.Trees[i].RecycleSearchResult(srs)
 	}
 
-	rs := make([]*SearchResult, 0, len(m))
+	rs := poolSearchResults.Get().(*[]*SearchResult)
+	*rs = (*rs)[:0]
 	for _, r := range m {
 		r.Deduplicate()
-		rs = append(rs, r)
+		*rs = append(*rs, r)
 	}
 
-	sort.Slice(rs, func(i, j int) bool {
-		return rs[i].Score() > rs[j].Score()
+	sort.Slice(*rs, func(i, j int) bool {
+		return (*rs)[i].Score() > (*rs)[j].Score()
 	})
 
 	return rs, nil

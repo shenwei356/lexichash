@@ -30,6 +30,26 @@ func Kmer2dna(code uint64, k int) []byte {
 	return kmers.Decode(code, k)
 }
 
+var bit2base = [4]byte{'A', 'C', 'G', 'T'}
+
+// MustDecoder returns a Decode function, which reuses the byte slice
+func MustDecoder() func(code uint64, k int) []byte {
+	buf := make([]byte, 0, 32)
+
+	return func(code uint64, k int) []byte {
+		kmer := buf[:k]
+		for i := 0; i < k; i++ {
+			kmer[k-1-i] = bit2base[code&3]
+
+			// it's slower than bit2base[code&3], according to the test.
+			// kmer[k-1-i] = byte(uint64(1413956417>>((code&3)<<3)) & 255)
+
+			code >>= 2
+		}
+		return kmer
+	}
+}
+
 // Strands could be used to output strand for a reverse complement flag
 var Strands = [2]byte{'+', '-'}
 

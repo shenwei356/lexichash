@@ -21,6 +21,8 @@
 package tree
 
 import (
+	"sync"
+
 	"github.com/shenwei356/kmers"
 )
 
@@ -295,8 +297,26 @@ type SearchResult struct {
 	Values    []uint64 // value of this key
 }
 
+var poolSearchResults = &sync.Pool{New: func() interface{} {
+	tmp := make([]*SearchResult, 0, 128)
+	return &tmp
+}}
+
+var poolSearchResult = &sync.Pool{New: func() interface{} {
+	return &SearchResult{}
+}}
+
+// RecycleSearchResult recycle search results objects
+func (idx *Tree) RecycleSearchResult(sr *[]*SearchResult) {
+	for _, r := range *sr {
+		poolSearchResult.Put(r)
+	}
+	poolSearchResults.Put(sr)
+}
+
 // Search finds keys that shared prefixes at least m bases.
-func (t *Tree) Search(key uint64, k uint8, m uint8) ([]SearchResult, bool) {
+// After using the result, do not forget to call RecycleSearchResult()
+func (t *Tree) Search(key uint64, k uint8, m uint8) (*[]*SearchResult, bool) {
 	if m < 1 {
 		m = 1
 	}
@@ -354,16 +374,21 @@ func (t *Tree) Search(key uint64, k uint8, m uint8) ([]SearchResult, bool) {
 	}
 
 	// output all leaves below n
-	results := make([]SearchResult, 0, 8)
+	// results := make([]SearchResult, 0, 8)
+	results := poolSearchResults.Get().(*[]*SearchResult)
+	*results = (*results)[:0]
+
 	var npre uint8
 	recursiveWalk(target, func(key uint64, k uint8, v []uint64) bool {
 		npre = KmerLongestPrefix(key0, key, k0, k)
-		results = append(results, SearchResult{
-			Kmer:      key,
-			K:         k,
-			LenPrefix: npre,
-			Values:    v,
-		})
+
+		r := poolSearchResult.Get().(*SearchResult)
+		r.Kmer = key
+		r.K = k
+		r.LenPrefix = npre
+		r.Values = v
+
+		*results = append(*results, r)
 		return false
 	})
 

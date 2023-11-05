@@ -31,6 +31,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/pkg/profile"
+	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	"github.com/shenwei356/lexichash"
 	"github.com/shenwei356/xopen"
@@ -63,6 +65,8 @@ Options/Flags:
 	cannonical := flag.Bool("c", false, "using cannocial k-mers")
 	minLen := flag.Int("m", 13, "minimum length of shared substrings")
 	threads := flag.Int("j", runtime.NumCPU(), "number of threads")
+	pfCPU := flag.Bool("pprof-cpu", false, "pprofile CPU")
+	pfMEM := flag.Bool("pprof-mem", false, "pprofile memory")
 
 	flag.Parse()
 
@@ -100,6 +104,13 @@ Options/Flags:
 
 	// -----------------------------------------------
 
+	// go tool pprof -http=:8080 cpu.pprof
+	if *pfCPU {
+		defer profile.Start(profile.CPUProfile, profile.ProfilePath(".")).Stop()
+	} else if *pfMEM {
+		defer profile.Start(profile.MemProfile, profile.ProfilePath(".")).Stop()
+	}
+
 	outfh, err := xopen.Wopen("-")
 	checkError(err)
 	defer outfh.Close()
@@ -111,6 +122,7 @@ Options/Flags:
 	log.Printf("starting to build the index from %d files", len(flag.Args()[1:]))
 	sTime := time.Now()
 
+	seq.ValidateSeq = false
 	var record *fastx.Record
 	var fastxReader *fastx.Reader
 	var nSeqs int
@@ -144,9 +156,12 @@ Options/Flags:
 
 	fastxReader, err = fastx.NewReader(nil, flag.Args()[0], "")
 	checkError(err)
-	var sr []*lexichash.SearchResult
+	var sr *[]*lexichash.SearchResult
 	var r *lexichash.SearchResult
+	var v *[2]lexichash.Substr
 	var nQueries int
+	decoder := lexichash.MustDecoder()
+
 	for {
 		record, err = fastxReader.Read()
 		if err != nil {
@@ -167,15 +182,16 @@ Options/Flags:
 			continue
 		}
 
-		for _, r = range sr {
-			for _, v := range r.Subs {
+		for _, r = range *sr {
+			for _, v = range *r.Subs {
 				fmt.Fprintf(outfh, "%s\t%s\t%d\t%d\t%c\t%d\t%d\t%c\t%d\t%s\n",
 					record.ID, idx.IDs[r.IdIdx],
 					v[0].Begin+1, v[0].End, lexichash.Strands[v[0].RC],
 					v[1].Begin+1, v[1].End, lexichash.Strands[v[1].RC],
-					v[0].K, v[0].KmerCode)
+					v[0].K, decoder(v[0].Code, v[0].K))
 			}
 		}
+		idx.RecycleSearchResult(sr)
 	}
 
 	log.Printf("finished searching with %d sequences in %s",

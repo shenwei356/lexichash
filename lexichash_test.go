@@ -80,13 +80,14 @@ func TestHash(t *testing.T) {
 	}
 	t.Log()
 	t.Logf("query: %s", "s2")
-	for i, r := range sr {
+	for i, r := range *sr {
 		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
-		for _, v := range r.Subs[0:] {
+		for _, v := range *r.Subs {
 			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 				v[0].Begin+1, v[0].End, Strands[v[0].RC],
 				v[1].Begin+1, v[1].End, Strands[v[1].RC],
 				v[0].K, v[0].KmerCode)
 		}
 	}
+	idx.RecycleSearchResult(sr)
 }
