@@ -20,7 +20,7 @@
 
 *.pprof
 
-
+cmd/binaries/*
 
 # data
 t_*
