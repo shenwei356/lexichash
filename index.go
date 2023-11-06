@@ -179,8 +179,12 @@ var pool2Subtr = &sync.Pool{New: func() interface{} {
 }}
 
 var poolSubs = &sync.Pool{New: func() interface{} {
-	tmp := make([]*[2]Substr, 0, 128)
+	tmp := make([]*[2]Substr, 0, 1024)
 	return &tmp
+}}
+
+var poolSearchResult = &sync.Pool{New: func() interface{} {
+	return &SearchResult{}
 }}
 
 var poolSearchResults = &sync.Pool{New: func() interface{} {
@@ -227,50 +231,84 @@ func (r *SearchResult) Deduplicate() {
 		return
 	}
 
+	// sory by: start, end ,strand
 	sort.Slice(*r.Subs, func(i, j int) bool {
 		if (*r.Subs)[i][0].Begin == (*r.Subs)[j][0].Begin {
+			if (*r.Subs)[i][0].End == (*r.Subs)[j][0].End {
+				return (*r.Subs)[i][0].RC < (*r.Subs)[j][0].RC
+			}
 			return (*r.Subs)[i][0].End > (*r.Subs)[j][0].End
 		}
 		return (*r.Subs)[i][0].Begin < (*r.Subs)[j][0].Begin
 	})
 
-	var i, j int
+	subs := poolSubs.Get().(*[]*[2]Substr)
+	*subs = (*subs)[:1]
+
 	var p, v *[2]Substr
-	var flag bool
 	p = (*r.Subs)[0]
-	for i = 1; i < len(*r.Subs); i++ {
-		v = (*r.Subs)[i]
+	(*subs)[0] = p
+	for _, v = range (*r.Subs)[1:] {
 		if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
 			v[0].End <= p[0].End { // or nested region
-			if !flag {
-				j = i // mark insertion position
-				flag = true
-			}
+			pool2Subtr.Put(v)
 			continue
 		}
-
-		if flag { // need to insert to previous position
-			pool2Subtr.Put((*r.Subs)[j])
-			(*r.Subs)[j] = v
-			j++
-		}
+		*subs = append(*subs, v)
 		p = v
 	}
-	if j > 0 {
-		*r.Subs = (*r.Subs)[:j]
-	}
+	poolSubs.Put(r.Subs)
+	r.Subs = subs
+
+	// so removing duplicated values in place is dangerous here.
+
+	// var i, j int
+	// var p, v *[2]Substr
+	// var flag bool
+	// p = (*r.Subs)[0]
+	// for i = 1; i < len(*r.Subs); i++ {
+	// 	v = (*r.Subs)[i]
+	// 	if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
+	// 		v[0].End <= p[0].End { // or nested region
+	// 		if !flag {
+	// 			j = i // mark insertion position
+	// 			flag = true
+	// 		}
+	// 		continue
+	// 	}
+
+	// 	if flag { // need to insert to previous position
+	// 		// CAN NOT DO THIS! I don't know why, it does not make sense.
+	// 		// pool2Subtr.Put((*r.Subs)[j]) // recycle the previous one
+	// 		(*r.Subs)[j] = v
+	// 		j++
+	// 	}
+	// 	p = v
+	// }
+	// if j > 0 {
+	// 	// CAN NOT DO THIS! Because there were moved to front postions
+	// 	// recycle the trimmed ones.
+	// 	// for _, v = range (*r.Subs)[j:] {
+	// 	// 	pool2Subtr.Put(v)
+	// 	// }
+	// 	*r.Subs = (*r.Subs)[:j]
+	// }
 
 	r.cleaned = true
 }
 
 // RecycleSearchResult recycle search results objects
 func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
-	var v *[2]Substr
+	if sr == nil {
+		return
+	}
+
 	for _, r := range *sr {
-		for _, v = range *r.Subs {
+		for _, v := range *r.Subs {
 			pool2Subtr.Put(v)
 		}
 		poolSubs.Put(r.Subs)
+		poolSearchResult.Put(r)
 	}
 	poolSearchResults.Put(sr)
 }
@@ -284,10 +322,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	}
 	defer idx.lh.RecycleMaskResult(_kmers, _locs)
 
-	var srs *[]*tree.SearchResult
-	var sr *tree.SearchResult
 	var refpos uint64
-	var ok bool
 	var i int
 	var kmer uint64
 	k := idx.lh.K
@@ -304,11 +339,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var K, _k int
 	var idIdx, pos, begin, end int
 	var rc uint8
-	var r *SearchResult
-	var subs *[]*[2]Substr
-	var _sub2 *[2]Substr
 	for i, kmer = range *_kmers {
-		srs, ok = idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
+		srs, ok := idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
 		if !ok {
 			continue
 		}
@@ -318,7 +350,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 		_rc = uint8(kmer & 1)
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
-		for _, sr = range *srs {
+		for _, sr := range *srs {
 			// fmt.Printf("    %s %d\n",
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
 			// 	sr.LenPrefix)
@@ -351,7 +383,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					begin, end = pos, pos+_k
 				}
 
-				_sub2 = pool2Subtr.Get().(*[2]Substr)
+				_sub2 := pool2Subtr.Get().(*[2]Substr)
 				(*_sub2)[0].Code = _code
 				(*_sub2)[0].K = _k
 				(*_sub2)[0].Begin = _begin
@@ -364,28 +396,30 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 				(*_sub2)[1].End = end
 				(*_sub2)[1].RC = rc
 
+				var r *SearchResult
 				if r, ok = m[idIdx]; !ok {
-					subs = poolSubs.Get().(*[]*[2]Substr)
+					subs := poolSubs.Get().(*[]*[2]Substr)
 					*subs = (*subs)[:0]
 
-					r = &SearchResult{
-						IdIdx: idIdx,
-						// Subs: [][2]Substr{{
-						// 	{kmers.KmerCode{Code: _code, K: _k}, _begin, _end, _rc},
-						// 	{kmers.KmerCode{Code: code, K: _k}, begin, end, rc},
-						// }},
-						Subs: subs,
-					}
+					r = poolSearchResult.Get().(*SearchResult)
+					r.IdIdx = idIdx
+					r.Subs = subs
+					r.cleaned = false
+					r.scoring = false
+					r.score = 0
+
 					m[idIdx] = r
 				}
 
 				*r.Subs = append(*r.Subs, _sub2)
-
-				// fmt.Println(r)
 			}
 		}
 
 		idx.Trees[i].RecycleSearchResult(srs)
+	}
+
+	if len(m) == 0 {
+		return nil, nil
 	}
 
 	rs := poolSearchResults.Get().(*[]*SearchResult)
@@ -395,7 +429,11 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 		*rs = append(*rs, r)
 	}
 
+	// sort by score, id index
 	sort.Slice(*rs, func(i, j int) bool {
+		if (*rs)[i].Score() == (*rs)[j].Score() {
+			return (*rs)[i].IdIdx < (*rs)[j].IdIdx
+		}
 		return (*rs)[i].Score() > (*rs)[j].Score()
 	})
 

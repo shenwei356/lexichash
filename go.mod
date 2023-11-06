@@ -3,6 +3,7 @@ module github.com/shenwei356/lexichash
 go 1.20
 
 require (
+	github.com/cznic/sortutil v0.0.0-20181122101858-f5f958428db8
 	github.com/pkg/profile v1.7.0
 	github.com/shenwei356/bio v0.9.0
 	github.com/shenwei356/kmers v0.1.0

@@ -29,8 +29,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"sync"
 	"time"
 
+	"github.com/cznic/sortutil"
 	"github.com/pkg/profile"
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
@@ -156,12 +159,78 @@ Options/Flags:
 
 	fastxReader, err = fastx.NewReader(nil, flag.Args()[0], "")
 	checkError(err)
-	var sr *[]*lexichash.SearchResult
-	var r *lexichash.SearchResult
-	var v *[2]lexichash.Substr
+
+	type Result struct {
+		id      uint64
+		queryID []byte
+		result  *[]*lexichash.SearchResult
+	}
+
 	var nQueries int
 	decoder := lexichash.MustDecoder()
 
+	printResult := func(queryID []byte, sr *[]*lexichash.SearchResult) {
+		if sr == nil {
+			return
+		}
+
+		for _, r := range *sr {
+			for _, v := range *r.Subs {
+				fmt.Fprintf(outfh, "%s\t%s\t%d\t%d\t%c\t%d\t%d\t%c\t%d\t%s\n",
+					queryID, idx.IDs[r.IdIdx],
+					v[0].Begin+1, v[0].End, lexichash.Strands[v[0].RC],
+					v[1].Begin+1, v[1].End, lexichash.Strands[v[1].RC],
+					v[0].K, decoder(v[0].Code, v[0].K))
+			}
+		}
+		idx.RecycleSearchResult(sr)
+	}
+
+	// outputter
+	ch := make(chan Result, *threads)
+	done := make(chan int)
+	go func() {
+		var id uint64 = 1 // for keepping order
+		buf := make(map[uint64]Result, 128)
+
+		var r, r2 Result
+		var ok bool
+
+		for r := range ch {
+			if id == r.id {
+				printResult(r.queryID, r.result)
+				id++
+				continue
+			}
+			buf[r.id] = r
+
+			if r2, ok = buf[id]; ok {
+				printResult(r2.queryID, r2.result)
+				delete(buf, r2.id)
+				id++
+			}
+		}
+		if len(buf) > 0 {
+			ids := make(sortutil.Uint64Slice, len(buf))
+			i := 0
+			for id := range buf {
+				ids[i] = id
+				i++
+			}
+			sort.Sort(ids)
+
+			for _, id := range ids {
+				r = buf[id]
+				printResult(r.queryID, r.result)
+			}
+
+		}
+		done <- 1
+	}()
+
+	var wg sync.WaitGroup
+	token := make(chan int, *threads)
+	var id uint64
 	for {
 		record, err = fastxReader.Read()
 		if err != nil {
@@ -174,26 +243,26 @@ Options/Flags:
 
 		nQueries++
 
-		sr, err = idx.Search(record.Seq.Seq, uint8(*minLen))
-		if err != nil {
-			checkError(err)
-		}
-		if sr == nil {
-			continue
-		}
+		token <- 1
+		wg.Add(1)
+		id++
+		go func(id uint64, record *fastx.Record) {
+			defer func() {
+				<-token
+				wg.Done()
+			}()
 
-		for _, r = range *sr {
-			for _, v = range *r.Subs {
-				fmt.Fprintf(outfh, "%s\t%s\t%d\t%d\t%c\t%d\t%d\t%c\t%d\t%s\n",
-					record.ID, idx.IDs[r.IdIdx],
-					v[0].Begin+1, v[0].End, lexichash.Strands[v[0].RC],
-					v[1].Begin+1, v[1].End, lexichash.Strands[v[1].RC],
-					v[0].K, decoder(v[0].Code, v[0].K))
+			sr, err := idx.Search(record.Seq.Seq, uint8(*minLen))
+			if err != nil {
+				checkError(err)
 			}
-		}
-		idx.RecycleSearchResult(sr)
-	}
 
+			ch <- Result{id: id, queryID: record.ID, result: sr}
+		}(id, record.Clone())
+	}
+	wg.Wait()
+	close(ch)
+	<-done
 	log.Printf("finished searching with %d sequences in %s",
 		nQueries, time.Since(sTime))
 }
