@@ -13,27 +13,26 @@ Example:
 ```
 $ memusg -t -s "lexic-hash-search -k 21 -n 1000 -m 13 -j 16 tests/hairpin.query.fasta tests/hairpin.fasta \
     | csvtk pretty -t"
-2023/11/04 23:38:53 starting to build the index from 1 files
-2023/11/04 23:39:08 finished building the index in 15.031332246s from 26379 sequences with 1000 masks
-2023/11/04 23:39:08 finished searching with 1 sequences in 2.254832ms
+2023/11/06 20:40:23 starting to build the index from 1 files
+2023/11/06 20:40:36 finished building the index in 13.259185495s from 26379 sequences with 1000 masks
+2023/11/06 20:40:36 finished searching with 1 sequences in 224.866024ms
 query   target         qstart   qend   qstrand   tstart   tend   tstrand   len   match
 -----   ------------   ------   ----   -------   ------   ----   -------   ---   --------------------
 query   cre-MIR9897    1        20     +         1        20     +         20    AGAAGGACGTGGACGTGGAT
 query   cre-MIR9897    22       34     +         22       34     +         13    CCGATAAGAAGGA
-query   cre-MIR9897    36       48     -         35       47     -         13    GGTACCTTACGGC
+query   cre-MIR9897    36       48     +         126      138    -         13    GCCGTAAGGTACC
 query   cre-MIR9897    50       68     -         49       67     -         19    CCCCTGCCCTCCCCACGCC
 query   cre-MIR9897    70       88     -         69       87     -         19    GCCCCTGATCCCCGTCCCT
 query   cre-MIR9897    71       90     +         70       89     +         20    GGGACGGGGATCAGGGGCAG
-query   ptr-mir-3138   57       72     -         7        22     +         16    CCTTCCCCTGCCCTCC
-query   gma-MIR5376    28       40     -         22       34     -         13    ACGGCGTCCTTCT
-query   hsa-mir-6850   64       76     +         25       37     +         13    AGGGGAAGGGACG
-query   hsa-mir-6799   59       71     -         40       52     +         13    CTTCCCCTGCCCT
-query   bta-mir-7865   57       69     +         4        16     +         13    GGAGGGCAGGGGA
+query   ptr-mir-3138   57       72     +         7        22     -         16    GGAGGGCAGGGGAAGG
 query   gga-mir-1456   65       77     +         74       86     -         13    GGGGAAGGGACGG
+query   gma-MIR5376    28       40     -         22       34     -         13    ACGGCGTCCTTCT
+query   hsa-mir-6799   59       71     -         40       52     +         13    CTTCCCCTGCCCT
+query   hsa-mir-6850   64       76     +         25       37     +         13    AGGGGAAGGGACG
+query   bta-mir-7865   57       69     +         4        16     +         13    GGAGGGCAGGGGA
 
-
-elapsed time: 15.107s
-peak rss: 3.32 GB
+elapsed time: 13.620s
+peak rss: 3.36 GB
 
 $ seqkit stats tests/hairpin.fasta
 file                 format  type  num_seqs    sum_len  min_len  avg_len  max_len
@@ -44,12 +43,12 @@ Pairwise searching
 
 ```
 $ memusg -t -s "lexic-hash-search -k 21 -n 1000 -m 15 -j 16 tests/hairpin.fasta tests/hairpin.fasta | pigz -c > t.gz"
-2023/11/04 23:45:22 starting to build the index from 1 files
-2023/11/04 23:45:36 finished building the index in 13.583252685s from 26379 sequences with 1000 masks
-2023/11/04 23:46:39 finished searching with 26379 sequences in 1m3.360959079s
+2023/11/06 20:41:41 starting to build the index from 1 files
+2023/11/06 20:41:56 finished building the index in 14.969412816s from 26379 sequences with 1000 masks
+2023/11/06 20:42:05 finished searching with 26379 sequences in 9.361483112s
 
-elapsed time: 1m:17s
-peak rss: 7.65 GB
+elapsed time: 24.496s
+peak rss: 4.13 GB
 ```
 
 Usage
@@ -74,6 +73,10 @@ Options/Flags:
         minimum length of shared substrings (default 13)
   -n int
         number of maskes/hashes (default 1000)
+  -pprof-cpu
+        pprofile CPU
+  -pprof-mem
+        pprofile memory
   -s int
         seed number (default 1)
 ```
