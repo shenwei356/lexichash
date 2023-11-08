@@ -153,8 +153,12 @@ Options/Flags:
 			nSeqs++
 
 			// idx.Insert([]byte(string(record.ID)), record.Seq.Seq)
-			r := record.Clone()
-			input <- lexichash.RefSeq{ID: r.ID, Seq: r.Seq.Seq}
+			_seq := make([]byte, len(record.Seq.Seq))
+			copy(_seq, record.Seq.Seq)
+			input <- lexichash.RefSeq{
+				ID:  []byte(string(record.ID)),
+				Seq: _seq,
+			}
 		}
 	}
 

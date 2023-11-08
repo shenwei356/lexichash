@@ -35,8 +35,8 @@ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZN
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 h1:OdAsTTz6OkFY5QxjkYwrChwuRruF69c169dPK26NUlk=
 github.com/rogpeppe/go-internal v1.11.0 h1:cWPaGQEPrBb5/AsnsZesgZZ9yb1OQ+GOISoDNXVBh4M=
 github.com/rogpeppe/go-internal v1.11.0/go.mod h1:ddIwULY96R17DhadqLgMfk9H9tvdUzkipdSkR5nkCZA=
-github.com/shenwei356/bio v0.9.0 h1:hz0g98DevxD01gY+x4jpdG+xlC8ArcoP5R6yZ9fZe5M=
-github.com/shenwei356/bio v0.9.0/go.mod h1:vINU5hawQF2wTayAEqlvCcGyPSkl5KLU3eCw5HoqowI=
+github.com/shenwei356/bio v0.9.1 h1:N8125n93N1CliBTBPe2ci980+f1GNByfIfvHlFHt0rY=
+github.com/shenwei356/bio v0.9.1/go.mod h1:vINU5hawQF2wTayAEqlvCcGyPSkl5KLU3eCw5HoqowI=
 github.com/shenwei356/kmers v0.1.0 h1:zPmWftXQWDugG99Wxd3rFmCIF2QZEUpEba3jOSEn7nE=
 github.com/shenwei356/kmers v0.1.0/go.mod h1:23Ltr95n98LYy9OtJMFSzkmU/1nmdYwgzqB3walAQ6g=
 github.com/shenwei356/util v0.5.0 h1:gbPuGYVggNLOSORuZLnpaB2DrIpyDFolHiZQkyja+XU=

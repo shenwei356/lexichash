@@ -190,9 +190,14 @@ type MaskResult struct {
 // Example:
 //
 //	input, done := BatchInsert()
-//	// record is a fastx.Record
-//	r := record.Clone()
-//	input <- RefSeq{ID: r.ID, Seq: r.Seq.Seq}
+//	// record is a fastx.Record//
+//	_seq := make([]byte, len(record.Seq.Seq))
+//	copy(_seq, record.Seq.Seq)
+//	input <- RefSeq{
+//		ID:  []byte(string(record.ID)),
+//		Seq: _seq,
+//	}
+//
 //	<- done
 func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 	if idx.batchInsert {

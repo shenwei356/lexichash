@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/cznic/sortutil v0.0.0-20181122101858-f5f958428db8
 	github.com/pkg/profile v1.7.0
-	github.com/shenwei356/bio v0.9.0
+	github.com/shenwei356/bio v0.9.1
 	github.com/shenwei356/kmers v0.1.0
 	github.com/shenwei356/xopen v0.3.1
 	github.com/twotwotwo/sorts v0.0.0-20160814051341-bf5c1f2b8553

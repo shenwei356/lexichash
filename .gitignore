@@ -27,3 +27,4 @@ cmd/lexic-hash-search
 t_*
 t.gz
 t.*
+*.fna.gz
