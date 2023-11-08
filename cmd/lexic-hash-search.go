@@ -21,6 +21,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -30,6 +31,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,8 +70,10 @@ Options/Flags:
 	cannonical := flag.Bool("c", false, "using cannocial k-mers")
 	minLen := flag.Int("m", 13, "minimum length of shared substrings")
 	threads := flag.Int("j", runtime.NumCPU(), "number of threads")
+	wholeFile := flag.Bool("w", false, "concatenate contigs as a whole sequence")
 	pfCPU := flag.Bool("pprof-cpu", false, "pprofile CPU")
 	pfMEM := flag.Bool("pprof-mem", false, "pprofile memory")
+	walk := flag.Bool("walk", false, "recursively walk trees to print some information")
 
 	flag.Parse()
 
@@ -136,6 +140,56 @@ Options/Flags:
 		fastxReader, err = fastx.NewReader(nil, file, "")
 		checkError(err)
 
+		if *wholeFile {
+			var allSeqs [][]byte
+			var bigSeq []byte
+			nnn := bytes.Repeat([]byte{'N'}, *k-1)
+
+			allSeqs = make([][]byte, 0, 8)
+			lenSum := 0
+			for {
+				record, err = fastxReader.Read()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					checkError(err)
+					break
+				}
+
+				aseq := make([]byte, len(record.Seq.Seq))
+				copy(aseq, record.Seq.Seq)
+				allSeqs = append(allSeqs, aseq)
+				lenSum += len(aseq)
+			}
+			if lenSum == 0 {
+				continue
+			}
+
+			if len(allSeqs) == 1 {
+				bigSeq = allSeqs[0]
+			} else {
+				bigSeq = make([]byte, lenSum+(len(allSeqs)-1)*(*k-1))
+				i := 0
+				for j, aseq := range allSeqs {
+					copy(bigSeq[i:i+len(aseq)], aseq)
+					if j < len(allSeqs)-1 {
+						copy(bigSeq[i+len(aseq):i+len(aseq)+*k-1], nnn)
+					}
+					i += len(aseq) + *k - 1
+				}
+			}
+
+			nSeqs++
+			id, _ := filepathTrimExtension(file)
+			input <- lexichash.RefSeq{
+				ID:  []byte(id),
+				Seq: bigSeq,
+			}
+
+			continue
+		}
+
 		for {
 			record, err = fastxReader.Read()
 			if err != nil {
@@ -168,6 +222,29 @@ Options/Flags:
 	log.Printf("finished building the index in %s from %d sequences with %d masks",
 		time.Since(sTime), nSeqs, *nMasks)
 
+	// -----------------------------------------------
+
+	if *walk {
+		fmt.Fprintf(outfh, "mask\tkmer\tlen_v\tref_id\tpos\tstrand\n")
+		decoder := lexichash.MustDecoder()
+		var refpos uint64
+		var idIdx uint64
+		var pos uint64
+		var rc uint8
+		for i, tree := range idx.Trees {
+			tree.Walk(func(key uint64, k uint8, v []uint64) bool {
+				for _, refpos = range v {
+					idIdx = refpos >> 38
+					pos = refpos << 26 >> 28
+					rc = uint8(refpos & 1)
+					fmt.Fprintf(outfh, "%d\t%s\t%d\t%d\t%d\t%c\n",
+						i, decoder(key, int(k)), len(v), idIdx, pos, lexichash.Strands[rc])
+				}
+				return false
+			})
+		}
+		return
+	}
 	// -----------------------------------------------
 
 	sTime = time.Now()
@@ -289,4 +366,45 @@ func checkError(err error) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func filepathTrimExtension(file string) (string, string) {
+	unik := strings.HasSuffix(file, ".unik")
+	if unik {
+		file = file[0 : len(file)-5]
+	}
+	gz := strings.HasSuffix(file, ".gz") || strings.HasSuffix(file, ".GZ")
+	if gz {
+		file = file[0 : len(file)-3]
+	}
+
+	fasta := strings.HasSuffix(file, ".fasta") || strings.HasSuffix(file, ".FASTA")
+	fastq := strings.HasSuffix(file, ".fastq") || strings.HasSuffix(file, ".FASTQ")
+	var fa, fq bool
+	if fasta || fastq {
+		file = file[0 : len(file)-6]
+	} else {
+		fa = strings.HasSuffix(file, ".fa") || strings.HasSuffix(file, ".FA") || strings.HasSuffix(file, ".fna") || strings.HasSuffix(file, ".FNA")
+		fq = strings.HasSuffix(file, ".fq") || strings.HasSuffix(file, ".FQ")
+	}
+
+	extension := filepath.Ext(file)
+	name := file[0 : len(file)-len(extension)]
+	switch {
+	case fasta:
+		extension += ".fasta"
+	case fastq:
+		extension += ".fastq"
+	case fa:
+		extension += ".fa"
+	case fq:
+		extension += ".fq"
+	}
+	if gz {
+		extension += ".gz"
+	}
+	if unik {
+		extension += ".unik"
+	}
+	return name, extension
 }
