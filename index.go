@@ -21,6 +21,7 @@
 package lexichash
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -29,6 +30,9 @@ import (
 	"github.com/shenwei356/kmers"
 	tree "github.com/shenwei356/lexichash/kmer-radix-tree"
 )
+
+// ErrKConcurrentInsert occurs when calling Insert during calling BatchInsert.
+var ErrKConcurrentInsert = errors.New("lexichash: concurrent insertion")
 
 // Index creates LexicHash index for mutitple reference sequences
 // and supports searching with a query sequence.
@@ -44,6 +48,7 @@ type Index struct {
 	IDs [][]byte // IDs of the reference genomes
 	i   uint32   // curent index, for inserting a new ref seq
 
+	batchInsert bool
 }
 
 // NewIndex ceates a new Index.
@@ -83,8 +88,14 @@ func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index
 // Threads is the maximum concurrency number for Insert().
 var Threads = runtime.NumCPU()
 
-// Insert adds a new reference sequence to the index
+// Insert adds a new reference sequence to the index.
+// Note that this method is not concurrency-safe,
+// you can use BatchInsert, which is faster.
 func (idx *Index) Insert(id []byte, s []byte) error {
+	if idx.batchInsert {
+		return ErrKConcurrentInsert
+	}
+
 	_kmers, locs, err := idx.lh.Mask(s)
 	if err != nil {
 		return err
@@ -155,6 +166,133 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 
 	return nil
 }
+
+// RefSeq represents a reference sequence to insert.
+type RefSeq struct {
+	ID  []byte
+	Seq []byte
+}
+
+type MaskResult struct {
+	ID    []byte
+	Kmers *[]uint64
+	Locs  *[]int
+}
+
+// BatchInsert insert a reference sequence in parallel.
+// It returns:
+//
+//	chan RefSeq, for sending sequence.
+//	sync.WaitGroup, for wait all masks being computed.
+//	chan int, for waiting all the insertions to be done.
+//
+// Example:
+//
+//	input, done := BatchInsert()
+//	// record is a fastx.Record
+//	r := record.Clone()
+//	input <- RefSeq{ID: r.ID, Seq: r.Seq.Seq}
+//	<- done
+func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
+	if idx.batchInsert {
+		panic(ErrKConcurrentInsert)
+	}
+	idx.batchInsert = true
+
+	input := make(chan RefSeq, Threads)
+	doneAll := make(chan int)
+
+	poolMaskResult := &sync.Pool{New: func() interface{} {
+		return &MaskResult{}
+	}}
+
+	go func() {
+		ch := make(chan *MaskResult, Threads)
+		doneInsert := make(chan int)
+
+		// insert to tree
+		go func() {
+			for m := range ch {
+				var wg sync.WaitGroup
+				tokens := make(chan int, Threads)
+
+				k := uint8(idx.lh.K)
+				nMasks := len(*(m.Kmers))
+				n := nMasks/Threads + 1
+				var start, end int
+				for j := 0; j <= Threads; j++ {
+					start, end = j*n, (j+1)*n
+					if end > nMasks {
+						end = nMasks
+					}
+
+					wg.Add(1)
+					tokens <- 1
+					go func(start, end int) {
+						var kmer uint64
+						var loc int
+						for i := start; i < end; i++ {
+							kmer = (*m.Kmers)[i]
+							loc = (*m.Locs)[i]
+
+							//  ref idx: 26 bits
+							//  pos:     36 bits
+							//  strand:   2 bits
+							refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+							idx.Trees[i].Insert(kmer>>2, k, refpos)
+						}
+						wg.Done()
+						<-tokens
+					}(start, end)
+				}
+				wg.Wait()
+
+				idx.IDs = append(idx.IDs, m.ID)
+				idx.i++
+
+				idx.lh.RecycleMaskResult(m.Kmers, m.Locs)
+				poolMaskResult.Put(m)
+			}
+			doneInsert <- 1
+		}()
+
+		// compute mask
+		var wg sync.WaitGroup
+		tokens := make(chan int, Threads)
+
+		for ref := range input {
+			tokens <- 1
+			wg.Add(1)
+			go func(ref RefSeq) {
+				_kmers, locs, err := idx.lh.Mask(ref.Seq)
+				if err != nil {
+					panic(err)
+				}
+
+				m := poolMaskResult.Get().(*MaskResult)
+				m.Kmers = _kmers
+				m.Locs = locs
+				m.ID = ref.ID
+				ch <- m
+
+				wg.Done()
+				<-tokens
+			}(ref)
+		}
+
+		wg.Wait()
+		close(ch)
+		<-doneInsert
+
+		doneAll <- 1
+	}()
+
+	// compute
+
+	return input, doneAll
+}
+
+// ---------------------------- for Search ----------------------------------
 
 // Substr represents a found substring.
 type Substr struct {
@@ -439,6 +577,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 	return rs, nil
 }
+
+// ---------------------------- for Debug ----------------------------------
 
 // Path represents the path of query in a tree
 type Path struct {

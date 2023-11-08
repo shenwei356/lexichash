@@ -21,10 +21,12 @@
 package lexichash
 
 import (
+	"io"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 )
 
@@ -51,22 +53,39 @@ func TestIndex(t *testing.T) {
 	}
 	// queryID := queries[0].ID
 
-	seqs, err := fastx.GetSeqs("tests/hairpin.fasta", nil, 8, 100, "")
+	sTime := time.Now()
+	t.Logf("starting to build the index ...")
+
+	input, done := idx.BatchInsert()
+
+	seq.ValidateSeq = false
+	var record *fastx.Record
+	fastxReader, err := fastx.NewReader(nil, "tests/hairpin.fasta", "")
 	if err != nil {
 		t.Error(err)
 		return
 	}
+	var nSeqs int
+	for {
+		record, err = fastxReader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Error(err)
+			return
+		}
 
-	sTime := time.Now()
-	t.Logf("starting to build the index ...")
-	for _, s := range seqs {
-		// if bytes.Equal(s.ID, queryID) { //skip the query sequence
-		// 	continue
-		// }
-		idx.Insert(s.ID, s.Seq.Seq)
+		nSeqs++
+		// idx.Insert([]byte(string(record.ID)), record.Seq.Seq)
+		r := record.Clone()
+		input <- RefSeq{ID: r.ID, Seq: r.Seq.Seq}
 	}
+	close(input) // wait BatchInsert
+	<-done       // wait BatchInsert
+
 	t.Logf("finished to build the index in %s from %d sequences with %d masks",
-		time.Since(sTime), len(seqs), nMasks)
+		time.Since(sTime), nSeqs, nMasks)
 
 	minLen := 13
 

@@ -255,7 +255,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locs *[]int) {
 //  1. the list of the most similar k-mers for each mask, with the last 2 bits a strand
 //     flag (1 for negative strand)
 //  2. the start positions of all k-mers.
-//     if k-mer comes from multiple locations, only the smaller one is kept.
+//     if a k-mer comes from multiple locations, only the smaller one is kept.
 func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go

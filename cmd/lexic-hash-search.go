@@ -125,6 +125,9 @@ Options/Flags:
 	log.Printf("starting to build the index from %d files", len(flag.Args()[1:]))
 	sTime := time.Now()
 
+	// BatchInsert is faster than Insert()
+	input, done := idx.BatchInsert()
+
 	seq.ValidateSeq = false
 	var record *fastx.Record
 	var fastxReader *fastx.Reader
@@ -143,11 +146,21 @@ Options/Flags:
 				break
 			}
 
+			if len(record.Seq.Seq) < *k {
+				continue
+			}
+
 			nSeqs++
 
-			idx.Insert([]byte(string(record.ID)), record.Seq.Seq)
+			// idx.Insert([]byte(string(record.ID)), record.Seq.Seq)
+			r := record.Clone()
+			input <- lexichash.RefSeq{ID: r.ID, Seq: r.Seq.Seq}
 		}
 	}
+
+	close(input) // wait BatchInsert
+	<-done       // wait BatchInsert
+
 	log.Printf("finished building the index in %s from %d sequences with %d masks",
 		time.Since(sTime), nSeqs, *nMasks)
 
@@ -188,7 +201,7 @@ Options/Flags:
 
 	// outputter
 	ch := make(chan Result, *threads)
-	done := make(chan int)
+	done = make(chan int)
 	go func() {
 		var id uint64 = 1 // for keepping order
 		buf := make(map[uint64]Result, 128)
@@ -269,7 +282,7 @@ Options/Flags:
 
 func checkError(err error) {
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
