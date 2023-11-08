@@ -277,7 +277,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 		(*hashes)[i] = math.MaxUint64
 	}
 
-	var mask, hash uint64
+	var mask, hash, h uint64
 	var kmer [2]uint64
 	var ok bool
 	var i, j int
@@ -315,17 +315,19 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 
 		for i, mask = range masks {
 			hash = kmer[0]>>2 ^ mask
+			h = (*hashes)[i]
 			// smaller hash
-			if hash < (*hashes)[i] {
+			if hash < h {
 				(*hashes)[i] = hash
 				(*_kmers)[i] = kmer[0]
 				(*locs)[i] = j
+				h = hash
 			}
 
 			// try both strands
 			hash = kmer[1]>>2 ^ mask
 			// smaller hash
-			if hash < (*hashes)[i] {
+			if hash < h {
 				(*hashes)[i] = hash
 				(*_kmers)[i] = kmer[1]
 				(*locs)[i] = j
