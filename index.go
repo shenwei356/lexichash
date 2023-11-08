@@ -173,6 +173,7 @@ type RefSeq struct {
 	Seq []byte
 }
 
+// MaskResult represents a mask result, it's only used in BatchInsert.
 type MaskResult struct {
 	ID    []byte
 	Kmers *[]uint64
@@ -452,7 +453,7 @@ func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
 }
 
 // Search queries the index with a sequence.
-// After using the result, do not forget to call RecycleSearchResult()
+// After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	_kmers, _locs, err := idx.lh.Mask(s)
 	if err != nil {

@@ -99,7 +99,10 @@ func (n *node) delEdge(label uint8) {
 // Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
 	root *node // root node
-	size int   // number of the elements (nodes and edges)
+
+	numNodes     int
+	numLeafNodes int
+	numEdges     int
 }
 
 // Tree implements a radix tree for k-mer querying
@@ -108,9 +111,19 @@ func New() *Tree {
 	return t
 }
 
-// Len returns the number of elements (nodes and edges)
-func (t *Tree) Len() int {
-	return t.size
+// NumNodes returns the number of nodes
+func (t *Tree) NumNodes() int {
+	return t.numNodes
+}
+
+// NumLeafNodes returns the number of leaf nodes
+func (t *Tree) NumLeafNodes() int {
+	return t.numLeafNodes
+}
+
+// NumEdges returns the number of edges
+func (t *Tree) NumEdges() int {
+	return t.numEdges
 }
 
 // Insert is used to add a newentry or update
@@ -142,7 +155,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 				k:   k0,
 				val: []uint64{v},
 			}
-			t.size++
+			t.numLeafNodes++
 			return nil, false
 		}
 
@@ -165,43 +178,49 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 				},
 			}
 			parent.addEdge(e)
-			t.size++
+			t.numNodes++
+			t.numLeafNodes++
+			t.numEdges++
 			return nil, false
 		}
 
 		// Determine longest prefix of the search key on match
 		commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
+		// the new key is longer than key of n, continue to search. len(prefix) = len(n)
 		if commonPrefix == n.k {
 			search = KmerSuffix(search, k, commonPrefix) // left bases
 			k = k - commonPrefix                         // need to update it
 			continue
 		}
 
-		// Split the node
-		t.size++
+		// the new key and the key of node n share a prefix, len(prefix) < len(n)
+		// Split the node n
 		child := &node{
 			// o---<=8, here the prefix of one of the 8 is ---,
 			prefix: KmerPrefix(search, k, commonPrefix),
 			k:      commonPrefix,
 		}
-		parent.updateEdge(KmerBaseAt(search, k, 0), child)
+		t.numNodes++
+		parent.updateEdge(KmerBaseAt(search, k, 0), child) // change from n to c
 
-		// Restore the existing node
+		// child points to n now
 		child.addEdge(&edge{
 			label: KmerBaseAt(n.prefix, n.k, commonPrefix),
 			node:  n,
 		})
+		t.numEdges++
 		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
-		// Create a new leaf node
+		// Create a new leaf node for the new key
 		leaf := &leafNode{
 			key: key0,
 			k:   k0,
 			val: []uint64{v},
 		}
+		t.numLeafNodes++
 
-		// If the new key is a subset, add to this node
+		// the new key is a prefix of the old n, add the leaf node to this node. len(new) = len(prefix)
 		search = KmerSuffix(search, k, commonPrefix)
 		k = k - commonPrefix
 		if k == 0 {
@@ -209,6 +228,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			return nil, false
 		}
 
+		// the new key and the key of node n share a prefix shorter than both of them
 		// Create a new edge for the node
 		child.addEdge(&edge{
 			label: KmerBaseAt(search, k, 0),
@@ -218,6 +238,8 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 				k:      k,
 			},
 		})
+		t.numNodes++
+		t.numEdges++
 		return nil, false
 	}
 }

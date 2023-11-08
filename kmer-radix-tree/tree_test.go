@@ -21,6 +21,7 @@
 package tree
 
 import (
+	"math/rand"
 	"strings"
 	"testing"
 
@@ -57,6 +58,10 @@ func TestTree(t *testing.T) {
 		_, _ = tree.Insert(i, uint8(k), v)
 	}
 
+	t.Logf("number of edges: %d\n", tree.NumEdges())
+	t.Logf("number of nodes: %d\n", tree.NumNodes())
+	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
+
 	// tree.Walk(func(code uint64, k uint8, v []uint64) bool {
 	// 	t.Logf("%s, %v\n", kmers.Decode(code, int(k)), v)
 	// 	return false
@@ -90,4 +95,63 @@ func TestTree(t *testing.T) {
 	code, _ = kmers.Encode([]byte(query))
 	nodes, bases := tree.Path(code, uint8(len(query)))
 	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
+}
+
+func TestBigTree(t *testing.T) {
+	nMasks := 1000
+
+	trees := make([]*Tree, nMasks)
+
+	for i := 0; i < nMasks; i++ {
+		tree := New()
+
+		k := 21
+		nKmers := 50000 // or the number of sequences
+		var seed int64 = 1
+		seed = int64(i)
+
+		n := int(float64(nKmers) * 1.2)
+		codes := make([]uint64, n)
+
+		r := rand.New(rand.NewSource(seed))
+		shift := 64 - k*2
+		var kmer uint64
+		for i := range codes {
+			kmer = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
+			codes[i] = kmer
+		}
+		uniqUint64s(&codes) // remove duplicates
+		if len(codes) > nKmers {
+			codes = codes[:nKmers]
+		}
+
+		for i, kmer := range codes {
+			_, _ = tree.Insert(kmer, uint8(k), uint64(i))
+		}
+
+		trees[i] = tree
+
+	}
+
+	tree := trees[0]
+	t.Logf("number of edges: %d\n", tree.NumEdges())
+	t.Logf("number of nodes: %d\n", tree.NumNodes())
+	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
+
+	query := "TCCATCTATTCGCTAGCATCA"
+	code, _ := kmers.Encode([]byte(query))
+	srs, ok := tree.Search(code, uint8(len(query)), 13)
+	t.Logf("query: %s\n", query)
+	if ok {
+		for _, sr := range *srs {
+			t.Logf("  %s, len(prefix): %d, %v\n",
+				kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
+		}
+		tree.RecycleSearchResult(srs)
+	}
+
+	code, _ = kmers.Encode([]byte(query))
+	nodes, bases := tree.Path(code, uint8(len(query)))
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
+
 }
