@@ -216,7 +216,7 @@ Options/Flags:
 			}
 
 			nSeqs++
-			id, _ := filepathTrimExtension(file)
+			id, _ := filepathTrimExtension(filepath.Base(file))
 			input <- lexichash.RefSeq{
 				ID:  []byte(id),
 				Seq: bigSeq,
