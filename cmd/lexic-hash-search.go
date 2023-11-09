@@ -21,8 +21,8 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -41,11 +41,14 @@ import (
 	"github.com/shenwei356/bio/seqio/fastx"
 	"github.com/shenwei356/lexichash"
 	"github.com/shenwei356/xopen"
+	"github.com/vbauerster/mpb/v5"
+	"github.com/vbauerster/mpb/v5/decor"
 )
 
 var version = "0.1.0"
 
 func main() {
+	app := filepath.Base(os.Args[0])
 	usage := fmt.Sprintf(`
 This command uses LexicHash to find shared substrings between query and target sequences.
 
@@ -53,10 +56,13 @@ Author: Wei Shen <shenwei356@gmail.com>
   Code: https://github.com/shenwei356/lexichash
 
 Version: v%s
-Usage: %s [options] <query fasta/q> <target fasta/q> [<target fasta/q> ...]
+
+Example: %s -f <(find dir/ -name "*.fna.gz") query.fasta
+
+Usage: %s [options] <query fasta/q> [<target fasta/q> ...]
 
 Options/Flags:
-`, version, filepath.Base(os.Args[0]))
+`, version, app, app)
 
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
@@ -68,8 +74,9 @@ Options/Flags:
 	nMasks := flag.Int("n", 1000, "number of maskes/hashes")
 	seed := flag.Int("s", 1, "seed number")
 	cannonical := flag.Bool("c", false, "using cannocial k-mers")
-	minLen := flag.Int("m", 13, "minimum length of shared substrings")
+	minLen := flag.Int("m", 15, "minimum length of shared substrings")
 	threads := flag.Int("j", runtime.NumCPU(), "number of threads")
+	fileList := flag.String("f", "", "file list")
 	wholeFile := flag.Bool("w", false, "concatenate contigs as a whole sequence")
 	pfCPU := flag.Bool("pprof-cpu", false, "pprofile CPU")
 	pfMEM := flag.Bool("pprof-mem", false, "pprofile memory")
@@ -80,11 +87,6 @@ Options/Flags:
 	if *help {
 		flag.Usage()
 		return
-	}
-
-	if flag.NArg() < 2 {
-		flag.Usage()
-		os.Exit(1)
 	}
 
 	if *k > 31 {
@@ -103,10 +105,12 @@ Options/Flags:
 		*threads = runtime.NumCPU()
 	}
 
-	for _, file := range flag.Args() {
-		if _, err := os.Stat(file); errors.Is(err, os.ErrNotExist) {
-			checkError(fmt.Errorf("%s", err))
-		}
+	log.Printf("checking input files ...")
+	files := getFileListFromArgsAndFile(*fileList, flag.Args(), true, true)
+
+	if len(files) < 2 {
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	// -----------------------------------------------
@@ -126,8 +130,37 @@ Options/Flags:
 	idx, err := lexichash.NewIndexWithSeed(*k, *nMasks, *cannonical, int64(*seed))
 	checkError(err)
 
-	log.Printf("starting to build the index from %d files", len(flag.Args()[1:]))
+	log.Printf("starting to build the index from %d files", len(files[1:]))
 	sTime := time.Now()
+
+	var pbs *mpb.Progress
+	var bar *mpb.Bar
+	var chDuration chan time.Duration
+	var doneDuration chan int
+	pbs = mpb.New(mpb.WithWidth(40), mpb.WithOutput(log.Writer()))
+	bar = pbs.AddBar(int64(len(files)-1),
+		mpb.BarStyle("[=>-]<+"),
+		mpb.PrependDecorators(
+			decor.Name("processed files: ", decor.WC{W: len("processed files: "), C: decor.DidentRight}),
+			decor.Name("", decor.WCSyncSpaceR),
+			decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+		),
+		// mpb.AppendDecorators(
+		// 	decor.Name("ETA: ", decor.WC{W: len("ETA: ")}),
+		// 	decor.EwmaETA(decor.ET_STYLE_GO, float64(*threads)),
+		// 	decor.OnComplete(decor.Name(""), ". done"),
+		// ),
+	)
+	chDuration = make(chan time.Duration, *threads)
+	doneDuration = make(chan int)
+	go func() {
+		for t := range chDuration {
+			bar.Increment()
+			bar.DecoratorEwmaUpdate(t)
+		}
+		doneDuration <- 1
+	}()
+	threadsFloat := float64(*threads)
 
 	// BatchInsert is faster than Insert()
 	input, done := idx.BatchInsert()
@@ -136,11 +169,13 @@ Options/Flags:
 	var record *fastx.Record
 	var fastxReader *fastx.Reader
 	var nSeqs int
-	for _, file := range flag.Args()[1:] {
+	for _, file := range files[1:] {
 		fastxReader, err = fastx.NewReader(nil, file, "")
 		checkError(err)
 
 		if *wholeFile {
+			startTime := time.Now()
+
 			var allSeqs [][]byte
 			var bigSeq []byte
 			nnn := bytes.Repeat([]byte{'N'}, *k-1)
@@ -187,6 +222,8 @@ Options/Flags:
 				Seq: bigSeq,
 			}
 
+			chDuration <- time.Duration(float64(time.Since(startTime)) / threadsFloat)
+
 			continue
 		}
 
@@ -213,14 +250,20 @@ Options/Flags:
 				ID:  []byte(string(record.ID)),
 				Seq: _seq,
 			}
+
 		}
 	}
 
 	close(input) // wait BatchInsert
 	<-done       // wait BatchInsert
+	if *wholeFile {
+		close(chDuration)
+		<-doneDuration
+	}
 
 	log.Printf("finished building the index in %s from %d sequences with %d masks",
 		time.Since(sTime), nSeqs, *nMasks)
+	log.Print()
 
 	// -----------------------------------------------
 
@@ -366,6 +409,80 @@ func checkError(err error) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func getFileList(args []string, checkFile bool) []string {
+	files := make([]string, 0, 1000)
+	if len(args) == 0 {
+		files = append(files, "-")
+	} else {
+		for _, file := range args {
+			if file == "-" {
+				continue
+			}
+			if !checkFile {
+				continue
+			}
+			if _, err := os.Stat(file); os.IsNotExist(err) {
+				checkError(err)
+			}
+		}
+		files = args
+	}
+	return files
+}
+
+func getFileListFromFile(file string, checkFile bool) ([]string, error) {
+	fh, err := os.Open(file)
+	if err != nil {
+		return nil, fmt.Errorf("read file list from '%s': %s", file, err)
+	}
+
+	var _file string
+	lists := make([]string, 0, 1000)
+	scanner := bufio.NewScanner(fh)
+	for scanner.Scan() {
+		_file = scanner.Text()
+		if strings.TrimSpace(_file) == "" {
+			continue
+		}
+		lists = append(lists, _file)
+	}
+	if err = scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read file list from '%s': %s", file, err)
+	}
+
+	if !checkFile {
+		return lists, nil
+	}
+
+	for _, _file = range lists {
+		if _file != "-" {
+			if _, err = os.Stat(_file); os.IsNotExist(err) {
+				return lists, fmt.Errorf("check file '%s': %s", _file, err)
+			}
+		}
+	}
+
+	return lists, nil
+}
+
+func getFileListFromArgsAndFile(infileList string, args []string, checkFileFromArgs bool, checkFileFromFile bool) []string {
+	files := getFileList(args, checkFileFromArgs)
+	if infileList != "" {
+		_files, err := getFileListFromFile(infileList, checkFileFromFile)
+		checkError(err)
+		if len(_files) == 0 {
+			log.Printf("no files found in file list: %s", infileList)
+			return files
+		}
+
+		if len(files) == 1 && files[0] == "-" {
+			return _files
+		}
+		files = append(files, _files...)
+	}
+	return files
 }
 
 func filepathTrimExtension(file string) (string, string) {
