@@ -28,7 +28,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/kmers"
-	tree "github.com/shenwei356/lexichash/kmer-radix-tree"
+	tree "github.com/shenwei356/lexichash/tree"
 )
 
 // ErrKConcurrentInsert occurs when calling Insert during calling BatchInsert.

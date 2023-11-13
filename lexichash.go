@@ -29,10 +29,10 @@ import (
 	"sync"
 
 	"github.com/shenwei356/kmers"
-	iterater "github.com/shenwei356/lexichash/kmer-iterator"
+	iterater "github.com/shenwei356/lexichash/iterator"
 )
 
-// ErrKOverflow means K >= 32.
+// ErrKOverflow means K > 31.
 var ErrKOverflow = errors.New("lexichash: k-mer size (4-31) overflow")
 
 // ErrInsufficientMasks means the number of masks is too small
@@ -40,7 +40,7 @@ var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (>=4)")
 
 // LexicHash is for finding shared substrings between nucleotide sequences.
 type LexicHash struct {
-	K int // max lenth of shared substrings, should be in range of [4, 31]
+	K int // max lenth of shared substrings, should be in range of [9, 31]
 
 	Seed  int64    // seed for generating masks
 	Masks []uint64 // masks
