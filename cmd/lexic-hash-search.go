@@ -80,7 +80,8 @@ Options/Flags:
 	wholeFile := flag.Bool("w", false, "concatenate contigs as a whole sequence")
 	pfCPU := flag.Bool("pprof-cpu", false, "pprofile CPU")
 	pfMEM := flag.Bool("pprof-mem", false, "pprofile memory")
-	walk := flag.Bool("walk", false, "recursively walk trees to print some information")
+	walk := flag.Int("walk", 1, "recursively walk a tree to print saved data (0 for all trees)")
+	skipFileChecking := flag.Bool("skip-fc", false, "skip file checking")
 
 	flag.Parse()
 
@@ -104,9 +105,17 @@ Options/Flags:
 	if *threads <= 0 {
 		*threads = runtime.NumCPU()
 	}
+	if *walk < 0 || *walk > *nMasks {
+		checkError(fmt.Errorf("walk should be in range of [0, n]"))
+	}
 
-	log.Printf("checking input files ...")
-	files := getFileListFromArgsAndFile(*fileList, flag.Args(), true, true)
+	if *skipFileChecking {
+		log.Printf("skip checking input files")
+	} else {
+		log.Printf("checking input files ...")
+	}
+
+	files := getFileListFromArgsAndFile(*fileList, flag.Args(), !*skipFileChecking, !*skipFileChecking)
 
 	if len(files) < 2 {
 		flag.Usage()
@@ -170,12 +179,12 @@ Options/Flags:
 	var fastxReader *fastx.Reader
 	var nSeqs int
 	for _, file := range files[1:] {
+		startTime := time.Now()
+
 		fastxReader, err = fastx.NewReader(nil, file, "")
 		checkError(err)
 
 		if *wholeFile {
-			startTime := time.Now()
-
 			var allSeqs [][]byte
 			var bigSeq []byte
 			nnn := bytes.Repeat([]byte{'N'}, *k-1)
@@ -250,8 +259,9 @@ Options/Flags:
 				ID:  []byte(string(record.ID)),
 				Seq: _seq,
 			}
-
 		}
+
+		chDuration <- time.Duration(float64(time.Since(startTime)) / threadsFloat)
 	}
 
 	close(input) // wait BatchInsert
@@ -259,6 +269,7 @@ Options/Flags:
 	if *wholeFile {
 		close(chDuration)
 		<-doneDuration
+		pbs.Wait()
 	}
 
 	log.Printf("finished building the index in %s from %d sequences with %d masks",
@@ -267,21 +278,35 @@ Options/Flags:
 
 	// -----------------------------------------------
 
-	if *walk {
+	if *walk >= 0 {
 		fmt.Fprintf(outfh, "mask\tkmer\tlen_v\tref_id\tpos\tstrand\n")
 		decoder := lexichash.MustDecoder()
 		var refpos uint64
 		var idIdx uint64
 		var pos uint64
 		var rc uint8
-		for i, tree := range idx.Trees {
+		if *walk == 0 {
+			for i, tree := range idx.Trees {
+				tree.Walk(func(key uint64, k uint8, v []uint64) bool {
+					for _, refpos = range v {
+						idIdx = refpos >> 38
+						pos = refpos << 26 >> 28
+						rc = uint8(refpos & 1)
+						fmt.Fprintf(outfh, "%d\t%s\t%d\t%d\t%d\t%c\n",
+							i+1, decoder(key, int(k)), len(v), idIdx, pos, lexichash.Strands[rc])
+					}
+					return false
+				})
+			}
+		} else {
+			tree := idx.Trees[*walk]
 			tree.Walk(func(key uint64, k uint8, v []uint64) bool {
 				for _, refpos = range v {
 					idIdx = refpos >> 38
 					pos = refpos << 26 >> 28
 					rc = uint8(refpos & 1)
 					fmt.Fprintf(outfh, "%d\t%s\t%d\t%d\t%d\t%c\n",
-						i, decoder(key, int(k)), len(v), idIdx, pos, lexichash.Strands[rc])
+						*walk, decoder(key, int(k)), len(v), idIdx, pos, lexichash.Strands[rc])
 				}
 				return false
 			})
