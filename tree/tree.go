@@ -277,11 +277,11 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 
 // Path returns the path of a key, i.e., the nodes list.
 // and the number of visited/matched bases.
-func (t *Tree) Path(key uint64, k uint8) ([]string, int) {
+func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 	n := t.root
 	search := key
 	nodes := make([]string, 0, k)
-	var matched int
+	var matched uint8
 	for {
 		// Check for key exhaution
 		if k == 0 {
@@ -300,11 +300,23 @@ func (t *Tree) Path(key uint64, k uint8) ([]string, int) {
 
 		// Consume the search prefix
 		if KmerHasPrefix(search, n.prefix, k, n.k) {
-			matched += int(n.k)
+			matched += n.k
 			nodes = append(nodes, string(kmers.Decode(n.prefix, int(n.k))))
 			search = KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
+			// also check the prefix, because the prefix of some nodes
+			// might be very long. Only checking prefix will ignore theses.
+			// For example, the strings below shared 4 bases,
+			// the third node would be this case.
+			//   A C AGCT
+			//   A C AGGC
+			matched += KmerLongestPrefix(search, n.prefix, k, n.k)
+			if matched >= minPrefix {
+				nodes = append(nodes, string(kmers.Decode(n.prefix, int(n.k))))
+				break
+			}
+
 			break
 		}
 	}

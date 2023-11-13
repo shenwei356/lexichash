@@ -93,7 +93,7 @@ func TestTree(t *testing.T) {
 
 	query = "ACGT"
 	code, _ = kmers.Encode([]byte(query))
-	nodes, bases := tree.Path(code, uint8(len(query)))
+	nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
 }
 
@@ -151,7 +151,7 @@ func TestBigTree(t *testing.T) {
 	}
 
 	code, _ = kmers.Encode([]byte(query))
-	nodes, bases := tree.Path(code, uint8(len(query)))
+	nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
 
 }

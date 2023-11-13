@@ -47,8 +47,8 @@ type LexicHash struct {
 
 	// pool for storing Kmers and Locs in Mask().
 	// users need to call
-	poolKmers *sync.Pool
-	poolLocs  *sync.Pool
+	poolKmers  *sync.Pool
+	poolLocses *sync.Pool
 
 	// a []uint64 for storing hashes in Mask(),
 	// the object is recycled in Mask()
@@ -110,9 +110,12 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 		kmers := make([]uint64, len(masks))
 		return &kmers
 	}}
-	lh.poolLocs = &sync.Pool{New: func() interface{} {
-		locs := make([]int, len(masks))
-		return &locs
+	lh.poolLocses = &sync.Pool{New: func() interface{} {
+		locses := make([][]int, len(masks))
+		for i := range locses {
+			locses[i] = make([]int, 1, 8)
+		}
+		return &locses
 	}}
 	lh.poolHashes = &sync.Pool{New: func() interface{} {
 		hashes := make([]uint64, len(masks))
@@ -136,23 +139,23 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 //	sub[2]>>2+1, sub[2]>>2+sub[1]
 func (lh *LexicHash) Compare(s1 []byte, s2 []byte, minLen int) ([][4]uint64, error) {
 	var kmers1, kmers2 *[]uint64
-	var locs1, locs2 *[]int
+	var locses1, locses2 *[][]int
 	var err1, err2 error
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		kmers1, locs1, err1 = lh.Mask(s1)
+		kmers1, locses1, err1 = lh.Mask(s1)
 		wg.Done()
 	}()
 	go func() {
-		kmers2, locs2, err2 = lh.Mask(s2)
+		kmers2, locses2, err2 = lh.Mask(s2)
 		wg.Done()
 	}()
 	wg.Wait()
 	defer func() {
-		lh.RecycleMaskResult(kmers1, locs1)
-		lh.RecycleMaskResult(kmers2, locs2)
+		lh.RecycleMaskResult(kmers1, locses1)
+		lh.RecycleMaskResult(kmers2, locses2)
 	}()
 
 	if err1 != nil {
@@ -179,21 +182,23 @@ func (lh *LexicHash) Compare(s1 []byte, s2 []byte, minLen int) ([][4]uint64, err
 			continue
 		}
 
-		loc1 = (*locs1)[i]
-		if k1&1 > 0 { // it's from the negative strand
-			loc1 = loc1 + k - n
-		}
-		loc2 = (*locs2)[i]
-		if k2&1 > 0 { // it's from the negative strand
-			loc2 = loc2 + k - n
-		}
+		for _, loc1 = range (*locses1)[i] {
+			for _, loc2 = range (*locses2)[i] {
+				if k1&1 > 0 { // it's from the negative strand
+					loc1 = loc1 + k - n
+				}
+				if k2&1 > 0 { // it's from the negative strand
+					loc2 = loc2 + k - n
+				}
 
-		subs = append(subs, [4]uint64{
-			k1 >> ((k - n + 1) << 1),       // k-mer code of shared substring
-			uint64(n),                      // length of shared substring
-			uint64(uint64(loc1)<<2 | k1&1), // (start position in s1)<<2 + (negative strand flag)
-			uint64(uint64(loc2)<<2 | k2&1), // (start position in s2)<<2 + (negative strand flag)
-		})
+				subs = append(subs, [4]uint64{
+					k1 >> ((k - n + 1) << 1),       // k-mer code of shared substring
+					uint64(n),                      // length of shared substring
+					uint64(uint64(loc1)<<2 | k1&1), // (start position in s1)<<2 + (negative strand flag)
+					uint64(uint64(loc2)<<2 | k2&1), // (start position in s2)<<2 + (negative strand flag)
+				})
+			}
+		}
 	}
 
 	// sort and remove duplicates or nested regions
@@ -240,12 +245,12 @@ func (lh *LexicHash) Compare(s1 []byte, s2 []byte, minLen int) ([][4]uint64, err
 
 // RecycleMaskResult recycles the results of Mask().
 // Please do not forget to call this method!
-func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locs *[]int) {
+func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 	if kmers != nil {
 		lh.poolKmers.Put(kmers)
 	}
-	if locs != nil {
-		lh.poolLocs.Put(locs)
+	if locses != nil {
+		lh.poolLocses.Put(locses)
 	}
 }
 
@@ -255,8 +260,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locs *[]int) {
 //  1. the list of the most similar k-mers for each mask, with the last 2 bits a strand
 //     flag (1 for negative strand)
 //  2. the start positions of all k-mers.
-//     if a k-mer comes from multiple locations, only the smaller one is kept.
-func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
+func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	// this one only supports k<=31, with the last two bits as a flag
@@ -267,20 +271,17 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 	}
 
 	var masks = lh.Masks
-	// _kmers := make([]uint64, len(masks)) // matched k-mers
-	// hashes := make([]uint64, len(masks)) // hashes of matched k-mers
-	// locs := make([]int, len(masks))     // locations of the matched k-mers
-	_kmers := lh.poolKmers.Get().(*[]uint64)
-	locs := lh.poolLocs.Get().(*[]int)
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
 	for i := range *hashes {
 		(*hashes)[i] = math.MaxUint64
 	}
-
 	var mask, hash, h uint64
 	var kmer [2]uint64
 	var ok bool
 	var i, j int
+	var locs *[]int
 	canonical := lh.canonical
 
 	if canonical {
@@ -292,18 +293,24 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 			j = iter.Index()
 
 			for i, mask = range masks {
+				h = (*hashes)[i]
 				hash = kmer[0]>>2 ^ mask
-				// smaller hash
-				if hash < (*hashes)[i] {
+
+				if hash < h { // smaller hash value
 					(*hashes)[i] = hash
 					(*_kmers)[i] = kmer[0]
-					(*locs)[i] = j
+					locs = &(*locses)[i]
+					*locs = (*locs)[:1]
+					(*locs)[0] = j
+				} else if hash == h { // same hash value
+					locs = &(*locses)[i]
+					*locs = append(*locs, j)
 				}
 			}
 		}
 
 		lh.poolHashes.Put(hashes)
-		return _kmers, locs, nil
+		return _kmers, locses, nil
 	}
 
 	for {
@@ -314,27 +321,37 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[]int, error) {
 		j = iter.Index()
 
 		for i, mask = range masks {
-			hash = kmer[0]>>2 ^ mask
 			h = (*hashes)[i]
-			// smaller hash
+
+			hash = kmer[0]>>2 ^ mask
 			if hash < h {
 				(*hashes)[i] = hash
 				(*_kmers)[i] = kmer[0]
-				(*locs)[i] = j
-				h = hash
+				locs = &(*locses)[i]
+				*locs = (*locs)[:1]
+				(*locs)[0] = j
+
+				h = (*hashes)[i] // do not forget to update h
+			} else if hash == h {
+				locs = &(*locses)[i]
+				*locs = append(*locs, j)
 			}
 
 			// try both strands
 			hash = kmer[1]>>2 ^ mask
-			// smaller hash
 			if hash < h {
 				(*hashes)[i] = hash
-				(*_kmers)[i] = kmer[1]
-				(*locs)[i] = j
+				(*_kmers)[i] = kmer[0]
+				locs = &(*locses)[i]
+				*locs = (*locs)[:1]
+				(*locs)[0] = j
+			} else if hash == h {
+				locs = &(*locses)[i]
+				*locs = append(*locs, j)
 			}
 		}
 	}
 
 	lh.poolHashes.Put(hashes)
-	return _kmers, locs, nil
+	return _kmers, locses, nil
 }

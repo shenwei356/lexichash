@@ -96,25 +96,25 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 		return ErrKConcurrentInsert
 	}
 
-	_kmers, locs, err := idx.lh.Mask(s)
+	_kmers, locses, err := idx.lh.Mask(s)
 	if err != nil {
 		return err
 	}
-	defer idx.lh.RecycleMaskResult(_kmers, locs)
+	defer idx.lh.RecycleMaskResult(_kmers, locses)
 
 	if Threads == 1 {
 		var loc int
 		var refpos uint64
 		k := uint8(idx.lh.K)
 		for i, kmer := range *_kmers {
-			loc = (*locs)[i]
+			for _, loc = range (*locses)[i] {
+				//  ref idx: 26 bits
+				//  pos:     36 bits
+				//  strand:   2 bits
+				refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
 
-			//  ref idx: 26 bits
-			//  pos:     36 bits
-			//  strand:   2 bits
-			refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-
-			idx.Trees[i].Insert(kmer>>2, k, refpos)
+				idx.Trees[i].Insert(kmer>>2, k, refpos)
+			}
 		}
 
 		idx.IDs = append(idx.IDs, id)
@@ -147,13 +147,13 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 			var loc int
 			for i := start; i < end; i++ {
 				kmer = (*_kmers)[i]
-				loc = (*locs)[i]
-
-				//  ref idx: 26 bits
-				//  pos:     36 bits
-				//  strand:   2 bits
-				refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-				idx.Trees[i].Insert(kmer>>2, k, refpos)
+				for _, loc = range (*locses)[i] {
+					//  ref idx: 26 bits
+					//  pos:     36 bits
+					//  strand:   2 bits
+					refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+					idx.Trees[i].Insert(kmer>>2, k, refpos)
+				}
 			}
 			wg.Done()
 			<-tokens
@@ -175,9 +175,9 @@ type RefSeq struct {
 
 // MaskResult represents a mask result, it's only used in BatchInsert.
 type MaskResult struct {
-	ID    []byte
-	Kmers *[]uint64
-	Locs  *[]int
+	ID     []byte
+	Kmers  *[]uint64
+	Locses *[][]int
 }
 
 // BatchInsert insert a reference sequence in parallel.
@@ -239,13 +239,13 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 						var loc int
 						for i := start; i < end; i++ {
 							kmer = (*m.Kmers)[i]
-							loc = (*m.Locs)[i]
-
-							//  ref idx: 26 bits
-							//  pos:     36 bits
-							//  strand:   2 bits
-							refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-							idx.Trees[i].Insert(kmer>>2, k, refpos)
+							for _, loc = range (*m.Locses)[i] {
+								//  ref idx: 26 bits
+								//  pos:     36 bits
+								//  strand:   2 bits
+								refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+								idx.Trees[i].Insert(kmer>>2, k, refpos)
+							}
 						}
 						wg.Done()
 						<-tokens
@@ -256,7 +256,7 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 				idx.IDs = append(idx.IDs, m.ID)
 				idx.i++
 
-				idx.lh.RecycleMaskResult(m.Kmers, m.Locs)
+				idx.lh.RecycleMaskResult(m.Kmers, m.Locses)
 				poolMaskResult.Put(m)
 			}
 			doneInsert <- 1
@@ -270,14 +270,14 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 			tokens <- 1
 			wg.Add(1)
 			go func(ref RefSeq) {
-				_kmers, locs, err := idx.lh.Mask(ref.Seq)
+				_kmers, locses, err := idx.lh.Mask(ref.Seq)
 				if err != nil {
 					panic(err)
 				}
 
 				m := poolMaskResult.Get().(*MaskResult)
 				m.Kmers = _kmers
-				m.Locs = locs
+				m.Locses = locses
 				m.ID = ref.ID
 				ch <- m
 
@@ -404,40 +404,6 @@ func (r *SearchResult) Deduplicate() {
 	poolSubs.Put(r.Subs)
 	r.Subs = subs
 
-	// so removing duplicated values in place is dangerous here.
-
-	// var i, j int
-	// var p, v *[2]Substr
-	// var flag bool
-	// p = (*r.Subs)[0]
-	// for i = 1; i < len(*r.Subs); i++ {
-	// 	v = (*r.Subs)[i]
-	// 	if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
-	// 		v[0].End <= p[0].End { // or nested region
-	// 		if !flag {
-	// 			j = i // mark insertion position
-	// 			flag = true
-	// 		}
-	// 		continue
-	// 	}
-
-	// 	if flag { // need to insert to previous position
-	// 		// CAN NOT DO THIS! I don't know why, it does not make sense.
-	// 		// pool2Subtr.Put((*r.Subs)[j]) // recycle the previous one
-	// 		(*r.Subs)[j] = v
-	// 		j++
-	// 	}
-	// 	p = v
-	// }
-	// if j > 0 {
-	// 	// CAN NOT DO THIS! Because there were moved to front postions
-	// 	// recycle the trimmed ones.
-	// 	// for _, v = range (*r.Subs)[j:] {
-	// 	// 	pool2Subtr.Put(v)
-	// 	// }
-	// 	*r.Subs = (*r.Subs)[:j]
-	// }
-
 	r.cleaned = true
 }
 
@@ -460,11 +426,11 @@ func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
-	_kmers, _locs, err := idx.lh.Mask(s)
+	_kmers, _locses, err := idx.lh.Mask(s)
 	if err != nil {
 		return nil, err
 	}
-	defer idx.lh.RecycleMaskResult(_kmers, _locs)
+	defer idx.lh.RecycleMaskResult(_kmers, _locses)
 
 	var refpos uint64
 	var i int
@@ -489,8 +455,6 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			continue
 		}
 
-		// queyr substring
-		_pos = (*_locs)[i]
 		_rc = uint8(kmer & 1)
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
@@ -502,60 +466,63 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			K = int(sr.K)
 			_k = int(sr.LenPrefix)
 
-			// query
-			if _rc > 0 {
-				_begin, _end = _pos+K-_k, _pos+K
-			} else {
-				_begin, _end = _pos, _pos+_k
-			}
-			_code = tree.KmerPrefix(kmer>>2, sr.K, sr.LenPrefix)
-
-			// matched
-			code = tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix)
-
-			for _, refpos = range sr.Values {
-				// fmt.Printf("      %s, %d, %c\n",
-				// 	idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
-
-				idIdx = int(refpos >> 38)
-				pos = int(refpos << 26 >> 28)
-				rc = uint8(refpos & 1)
-
-				if rc > 0 {
-					begin, end = pos+K-_k, pos+K
+			for _, _pos = range (*_locses)[i] {
+				// query
+				if _rc > 0 {
+					_begin, _end = _pos+K-_k, _pos+K
 				} else {
-					begin, end = pos, pos+_k
+					_begin, _end = _pos, _pos+_k
 				}
 
-				_sub2 := pool2Subtr.Get().(*[2]Substr)
-				(*_sub2)[0].Code = _code
-				(*_sub2)[0].K = _k
-				(*_sub2)[0].Begin = _begin
-				(*_sub2)[0].End = _end
-				(*_sub2)[0].RC = _rc
+				_code = tree.KmerPrefix(kmer>>2, sr.K, sr.LenPrefix)
 
-				(*_sub2)[1].Code = code
-				(*_sub2)[1].K = _k
-				(*_sub2)[1].Begin = begin
-				(*_sub2)[1].End = end
-				(*_sub2)[1].RC = rc
+				// matched
+				code = tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix)
 
-				var r *SearchResult
-				if r, ok = m[idIdx]; !ok {
-					subs := poolSubs.Get().(*[]*[2]Substr)
-					*subs = (*subs)[:0]
+				for _, refpos = range sr.Values {
+					// fmt.Printf("      %s, %d, %c\n",
+					// 	idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
 
-					r = poolSearchResult.Get().(*SearchResult)
-					r.IdIdx = idIdx
-					r.Subs = subs
-					r.cleaned = false
-					r.scoring = false
-					r.score = 0
+					idIdx = int(refpos >> 38)
+					pos = int(refpos << 26 >> 28)
+					rc = uint8(refpos & 1)
 
-					m[idIdx] = r
+					if rc > 0 {
+						begin, end = pos+K-_k, pos+K
+					} else {
+						begin, end = pos, pos+_k
+					}
+
+					_sub2 := pool2Subtr.Get().(*[2]Substr)
+					(*_sub2)[0].Code = _code
+					(*_sub2)[0].K = _k
+					(*_sub2)[0].Begin = _begin
+					(*_sub2)[0].End = _end
+					(*_sub2)[0].RC = _rc
+
+					(*_sub2)[1].Code = code
+					(*_sub2)[1].K = _k
+					(*_sub2)[1].Begin = begin
+					(*_sub2)[1].End = end
+					(*_sub2)[1].RC = rc
+
+					var r *SearchResult
+					if r, ok = m[idIdx]; !ok {
+						subs := poolSubs.Get().(*[]*[2]Substr)
+						*subs = (*subs)[:0]
+
+						r = poolSearchResult.Get().(*SearchResult)
+						r.IdIdx = idIdx
+						r.Subs = subs
+						r.cleaned = false
+						r.scoring = false
+						r.score = 0
+
+						m[idIdx] = r
+					}
+
+					*r.Subs = append(*r.Subs, _sub2)
 				}
-
-				*r.Subs = append(*r.Subs, _sub2)
 			}
 		}
 
@@ -590,16 +557,16 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 type Path struct {
 	TreeIdx int
 	Nodes   []string
-	Bases   int
+	Bases   uint8
 }
 
 // Paths returned the paths in all trees
-func (idx *Index) Paths(key uint64, k uint8, minPrefix int) []Path {
-	var bases int
+func (idx *Index) Paths(key uint64, k uint8, minPrefix uint8) []Path {
+	var bases uint8
 	paths := make([]Path, 0, 8)
 	for i, tree := range idx.Trees {
 		var nodes []string
-		nodes, bases = tree.Path(key, uint8(k))
+		nodes, bases = tree.Path(key, uint8(k), minPrefix)
 		if bases >= minPrefix {
 			paths = append(paths, Path{TreeIdx: i, Nodes: nodes, Bases: bases})
 		}

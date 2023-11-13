@@ -23,11 +23,13 @@ package lexichash
 import (
 	"io"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
+	"github.com/shenwei356/kmers"
 )
 
 func TestIndex(t *testing.T) {
@@ -42,7 +44,7 @@ func TestIndex(t *testing.T) {
 		return
 	}
 
-	queries, err := fastx.GetSeqs("tests/hairpin.query.fasta", nil, 8, 100, "")
+	queries, err := fastx.GetSeqs("test_data/hairpin.query.fasta", nil, 8, 100, "")
 	if err != nil {
 		t.Error(err)
 		return
@@ -51,7 +53,6 @@ func TestIndex(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	// queryID := queries[0].ID
 
 	sTime := time.Now()
 	t.Logf("starting to build the index ...")
@@ -60,7 +61,7 @@ func TestIndex(t *testing.T) {
 
 	seq.ValidateSeq = false
 	var record *fastx.Record
-	fastxReader, err := fastx.NewReader(nil, "tests/hairpin.fasta", "")
+	fastxReader, err := fastx.NewReader(nil, "test_data/hairpin.fasta", "")
 	if err != nil {
 		t.Error(err)
 		return
@@ -118,19 +119,16 @@ func TestIndex(t *testing.T) {
 		idx.RecycleSearchResult(sr)
 	}
 
-	// _queries := []string{
-	// 	"GGCGTGGGGAGGGCAGGGG",
-	// 	"CCGATAAGAAGGA",
-	// 	"CTGCCCCTGATCCCCGTCCCT",
-	// 	"CTGCCCCTGATCC",
-	// 	"CTGCCCCTGA",
-	// }
-	// for _, query := range _queries {
-	// 	code, _ := kmers.Encode([]byte(query))
-	// 	t.Log()
-	// 	t.Logf("path of %s\n", query)
-	// 	for _, path := range idx.Paths(code, uint8(len(query)), len(query)) {
-	// 		t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(path.Nodes, "->"))
-	// 	}
-	// }
+	_queries := []string{
+		"AGAAGGACGTGGACGTGGAT",
+		"GGGACGGGGATCAGGGGCAG",
+	}
+	for _, query := range _queries {
+		code, _ := kmers.Encode([]byte(query))
+		t.Log()
+		t.Logf("path of %s\n", query)
+		for _, path := range idx.Paths(code, uint8(len(query)), uint8(len(query))) {
+			t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(path.Nodes, "->"))
+		}
+	}
 }
