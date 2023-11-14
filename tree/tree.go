@@ -57,26 +57,26 @@ func (n node) String() string {
 		}
 	}
 
-	return fmt.Sprintf("NODE: prefix: %s, edges: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
+	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
 }
 
-func (n *node) isLeaf() bool {
-	return n.leaf != nil
-}
+// func (n *node) isLeaf() bool {
+// 	return n.leaf != nil
+// }
 
-func (n *node) addChild(label uint8, node *node) {
-	n.numChildren++
-	n.children[label] = node
-}
+// func (n *node) addChild(label uint8, node *node) {
+// 	n.numChildren++
+// 	n.children[label] = node
+// }
 
-func (n *node) updateChild(label uint8, node *node) {
-	n.children[label] = node
-}
+// func (n *node) updateChild(label uint8, node *node) {
+// 	n.children[label] = node
+// }
 
 // actually, it returns the node that the edge connects to
-func (n *node) getChild(label uint8) *node {
-	return n.children[label]
-}
+// func (n *node) getChild(label uint8) *node {
+// 	return n.children[label]
+// }
 
 // Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
@@ -84,7 +84,6 @@ type Tree struct {
 
 	numNodes     int
 	numLeafNodes int
-	// numEdges     int
 }
 
 // Tree implements a radix tree for k-mer querying
@@ -115,7 +114,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 	for {
 		// Handle key exhaustion
 		if k == 0 {
-			if n.isLeaf() {
+			if n.leaf != nil {
 				old := n.leaf.val
 				if n.leaf.val == nil {
 					n.leaf.val = []uint64{v}
@@ -133,29 +132,34 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 				val: []uint64{v},
 			}
 			t.numLeafNodes++
+
 			return nil, false
 		}
 
-		// Look for the edge
+		// Look for the child
 		parent = n
-		n = n.getChild(KmerBaseAt(search, k, 0))
+		firstBase := KmerBaseAt(search, k, 0)
+		n = n.children[firstBase]
 
-		// No edge, create one
+		// No child, create one
 		if n == nil {
-			parent.addChild(KmerBaseAt(search, k, 0),
-				&node{
-					leaf: &leafNode{
-						key: key0,
-						k:   k0,
-						val: []uint64{v},
-					},
-					prefix: search,
-					k:      k,
-				})
+			parent.children[firstBase] = &node{
+				leaf: &leafNode{
+					key: key0,
+					k:   k0,
+					val: []uint64{v},
+				},
+				prefix: search,
+				k:      k,
+			}
+			parent.numChildren++
+
 			t.numNodes++
 			t.numLeafNodes++
 			return nil, false
 		}
+
+		// has a child -- exists a path
 
 		// Determine longest prefix of the search key on match
 		commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
@@ -174,10 +178,11 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			k:      commonPrefix,
 		}
 		t.numNodes++
-		parent.updateChild(KmerBaseAt(search, k, 0), child) // change from n to c
+		parent.children[firstBase] = child // change from n to c
 
 		// child points to n now
-		child.addChild(KmerBaseAt(n.prefix, n.k, commonPrefix), n)
+		child.children[KmerBaseAt(n.prefix, n.k, commonPrefix)] = n
+		child.numChildren++
 		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
@@ -198,13 +203,13 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		}
 
 		// the new key and the key of node n share a prefix shorter than both of them
-		// Create a new edge for the node
-		child.addChild(KmerBaseAt(search, k, 0),
-			&node{
-				leaf:   leaf,
-				prefix: search,
-				k:      k,
-			})
+		// Create a new child node for the node
+		child.children[KmerBaseAt(search, k, 0)] = &node{
+			leaf:   leaf,
+			prefix: search,
+			k:      k,
+		}
+		child.numChildren++
 		t.numNodes++
 		return nil, false
 	}
@@ -218,14 +223,14 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 	for {
 		// Check for key exhaution
 		if k == 0 {
-			if n.isLeaf() {
+			if n.leaf != nil {
 				return n.leaf.val, true
 			}
 			break
 		}
 
-		// Look for an edge
-		n = n.getChild(KmerBaseAt(search, k, 0))
+		// Look for a child
+		n = n.children[KmerBaseAt(search, k, 0)]
 		if n == nil { // not found
 			break
 		}
@@ -251,15 +256,15 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 	for {
 		// Check for key exhaution
 		if k == 0 {
-			if n.isLeaf() {
+			if n.leaf != nil {
 				nodes = append(nodes, string(kmers.Decode(n.leaf.key, int(n.leaf.k))))
 				return nodes, matched
 			}
 			break
 		}
 
-		// Look for an edge
-		n = n.getChild(KmerBaseAt(search, k, 0))
+		// Look for a child
+		n = n.children[KmerBaseAt(search, k, 0)]
 		if n == nil { // not found
 			break
 		}
@@ -334,8 +339,8 @@ func (t *Tree) Search(key uint64, k uint8, m uint8) (*[]*SearchResult, bool) {
 			break
 		}
 
-		// Look for an edge
-		n = n.getChild(KmerBaseAt(search, k, 0))
+		// Look for a child
+		n = n.children[KmerBaseAt(search, k, 0)]
 		if n == nil {
 			break
 		}
@@ -403,7 +408,7 @@ func (t *Tree) LongestPrefix(key uint64, k uint8) (uint64, uint8, []uint64, bool
 	search := key
 	for {
 		// Look for a leaf node
-		if n.isLeaf() {
+		if n.leaf != nil {
 			last = n.leaf
 		}
 
@@ -412,8 +417,8 @@ func (t *Tree) LongestPrefix(key uint64, k uint8) (uint64, uint8, []uint64, bool
 			break
 		}
 
-		// Look for an edge
-		n = n.getChild(KmerBaseAt(search, k, 0))
+		// Look for a child
+		n = n.children[KmerBaseAt(search, k, 0)]
 		if n == nil {
 			break
 		}
@@ -451,22 +456,22 @@ func recursiveWalk(n *node, fn WalkFn) bool {
 
 	// Recurse on the children
 	var i uint8
-	k := n.numChildren // keeps track of number of edges in previous iteration
+	k := n.numChildren // keeps track of number of children in previous iteration
 	for i < k {
 		child := nthChild(&n.children, i)
 		if recursiveWalk(child, fn) {
 			return true
 		}
 		// It is a possibility that the WalkFn modified the node we are
-		// iterating on. If there are no more edges, mergeChild happened,
-		// so the last edge became the current node n, on which we'll
+		// iterating on. If there are no more children, mergeChild happened,
+		// so the last child became the current node n, on which we'll
 		// iterate one last time.
 		if n.numChildren == 0 {
 			return recursiveWalk(n, fn)
 		}
-		// If there are now less edges than in the previous iteration,
+		// If there are now less children than in the previous iteration,
 		// then do not increment the loop index, since the current index
-		// points to a new edge. Otherwise, get to the next index.
+		// points to a new child. Otherwise, get to the next index.
 		if n.numChildren >= k {
 			i++
 		}
