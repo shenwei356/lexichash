@@ -278,7 +278,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 		(*hashes)[i] = math.MaxUint64
 	}
 	var mask, hash, h uint64
-	var kmer [2]uint64
+	var kmer, kmerRC uint64
 	var ok bool
 	var i, j int
 	var locs *[]int
@@ -286,7 +286,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 
 	if canonical {
 		for {
-			kmer, ok, _ = iter.NextKmer()
+			kmer, _, ok, _ = iter.NextKmer()
 			if !ok {
 				break
 			}
@@ -294,16 +294,15 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 
 			for i, mask = range masks {
 				h = (*hashes)[i]
-				hash = kmer[0]>>2 ^ mask
+				hash = kmer>>2 ^ mask
 
-				if hash < h { // smaller hash value
+				if hash <= h { // smaller hash value
 					(*hashes)[i] = hash
-					(*_kmers)[i] = kmer[0]
+					(*_kmers)[i] = kmer
 					locs = &(*locses)[i]
-					*locs = (*locs)[:1]
-					(*locs)[0] = j
-				} else if hash == h { // same hash value
-					locs = &(*locses)[i]
+					if hash < h {
+						*locs = (*locs)[:0]
+					}
 					*locs = append(*locs, j)
 				}
 			}
@@ -314,7 +313,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	}
 
 	for {
-		kmer, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
@@ -323,30 +322,28 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 		for i, mask = range masks {
 			h = (*hashes)[i]
 
-			hash = kmer[0]>>2 ^ mask
-			if hash < h {
+			hash = kmer>>2 ^ mask
+			if hash <= h {
 				(*hashes)[i] = hash
-				(*_kmers)[i] = kmer[0]
+				(*_kmers)[i] = kmer
 				locs = &(*locses)[i]
-				*locs = (*locs)[:1]
-				(*locs)[0] = j
+				if hash < h {
+					*locs = (*locs)[:0]
+				}
+				*locs = append(*locs, j)
 
 				h = (*hashes)[i] // do not forget to update h
-			} else if hash == h {
-				locs = &(*locses)[i]
-				*locs = append(*locs, j)
 			}
 
 			// try both strands
-			hash = kmer[1]>>2 ^ mask
-			if hash < h {
+			hash = kmerRC>>2 ^ mask
+			if hash <= h {
 				(*hashes)[i] = hash
-				(*_kmers)[i] = kmer[0]
+				(*_kmers)[i] = kmerRC
 				locs = &(*locses)[i]
-				*locs = (*locs)[:1]
-				(*locs)[0] = j
-			} else if hash == h {
-				locs = &(*locses)[i]
+				if hash < h {
+					*locs = (*locs)[:0]
+				}
 				*locs = append(*locs, j)
 			}
 		}

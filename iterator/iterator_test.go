@@ -35,12 +35,12 @@ func TestKmerIterator(t *testing.T) {
 		t.Errorf("fail to create aa iter rator")
 	}
 
-	var _codes [2]uint64
+	var code, codeRC uint64
 	var ok bool
 	// var idx int
 	codes := make([]uint64, 0, 1024)
 	for {
-		_codes, ok, err = iter.NextKmer()
+		code, codeRC, ok, err = iter.NextKmer()
 		if err != nil {
 			t.Error(err)
 		}
@@ -52,9 +52,9 @@ func TestKmerIterator(t *testing.T) {
 		// fmt.Printf("kmer: %d-%s, %s-%b, RC:%v\n",
 		// idx, iter.s.Seq[idx:idx+k], kmers.Decode(code>>2, k), code>>2, code&1 > 0)
 
-		codes = append(codes, _codes[0])
+		codes = append(codes, code)
 		if !canonical {
-			codes = append(codes, _codes[1])
+			codes = append(codes, codeRC)
 		}
 	}
 

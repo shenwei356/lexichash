@@ -112,20 +112,19 @@ func NewKmerIterator(s []byte, k int, canonical bool) (*Iterator, error) {
 // NextKmer returns next two k-mer codes.
 // codes[0] is for the positive strand,
 // codes[1] is for the negative strand.
-func (iter *Iterator) NextKmer() (codes [2]uint64, ok bool, err error) {
+func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	if iter.finished {
-		return codes, false, nil
+		return 0, 0, false, nil
 	}
 
 	if iter.idx == iter.end {
 		iter.finished = true
 		poolIterator.Put(iter)
-		return codes, false, nil
+		return 0, 0, false, nil
 	}
 
 	iter.e = iter.idx + iter.k
 	iter.kmer = iter.s[iter.idx:iter.e]
-	var code uint64
 
 	if !iter.first {
 		iter.codeBase = base2bit[iter.kmer[iter.kP1]]
@@ -144,21 +143,21 @@ func (iter *Iterator) NextKmer() (codes [2]uint64, ok bool, err error) {
 		iter.first = false
 	}
 	if err != nil {
-		return codes, false, fmt.Errorf("encode %s: %s", iter.kmer, err)
+		return 0, 0, false, fmt.Errorf("encode %s: %s", iter.kmer, err)
 	}
 
 	iter.preCode = code
 	iter.preCodeRC = iter.codeRC
 	iter.idx++
 
-	codes[0] = code << 2          // positive strand
-	codes[1] = iter.codeRC<<2 | 1 // negative strand
+	code = code << 2            // positive strand
+	codeRC = iter.codeRC<<2 | 1 // negative strand
 
 	if iter.canonical && code > iter.codeRC {
-		codes[0] = codes[1]
+		code = codeRC
 	}
 
-	return codes, true, nil
+	return code, codeRC, true, nil
 }
 
 // Index returns current 0-baesd index.
