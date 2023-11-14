@@ -19,3 +19,11 @@
 // THE SOFTWARE.
 
 package lexichash
+
+type TableIndex struct {
+	lh *LexicHash
+
+	IDs [][]byte // IDs of the reference genomes
+	i   uint32   // curent index, for inserting a new ref seq
+
+}
