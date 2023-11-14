@@ -113,7 +113,7 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 	lh.poolLocses = &sync.Pool{New: func() interface{} {
 		locses := make([][]int, len(masks))
 		for i := range locses {
-			locses[i] = make([]int, 1, 8)
+			locses[i] = make([]int, 1)
 		}
 		return &locses
 	}}

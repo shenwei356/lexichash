@@ -60,24 +60,6 @@ func (n node) String() string {
 	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
 }
 
-// func (n *node) isLeaf() bool {
-// 	return n.leaf != nil
-// }
-
-// func (n *node) addChild(label uint8, node *node) {
-// 	n.numChildren++
-// 	n.children[label] = node
-// }
-
-// func (n *node) updateChild(label uint8, node *node) {
-// 	n.children[label] = node
-// }
-
-// actually, it returns the node that the edge connects to
-// func (n *node) getChild(label uint8) *node {
-// 	return n.children[label]
-// }
-
 // Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
 	root *node // root node
