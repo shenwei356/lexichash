@@ -33,7 +33,6 @@ import (
 func TestStructSize(t *testing.T) {
 	log.Printf("struct: Sizeof, Alignof\n")
 	log.Printf("leafNode: %d, %d", unsafe.Sizeof(leafNode{}), unsafe.Alignof(leafNode{}))
-	log.Printf("edge: %d, %d", unsafe.Sizeof(edge{}), unsafe.Alignof(edge{}))
 	log.Printf("node: %d, %d", unsafe.Sizeof(node{}), unsafe.Alignof(node{}))
 
 }

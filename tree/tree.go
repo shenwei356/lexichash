@@ -38,26 +38,20 @@ func (l leafNode) String() string {
 	return fmt.Sprintf("%s with %d values", kmers.Decode(l.key, int(l.k)), len(l.val))
 }
 
-// edge is used to represent an edge node
-type edge struct {
-	label uint8 // one base in 2-bit code
-	node  *node // the child node it connects to
-}
-
 // node represents a node in the tree, might be the root, inner or leaf node.
 type node struct {
 	prefix uint64 // prefix of the current node
 	k      uint8  // bases length of the prefix
 
-	edgesNum uint8
-	edges    *[4]*edge // just use a array
+	numChildren uint8
+	children    [4]*node // just use an array
 
 	leaf *leafNode // optional
 }
 
 func (n node) String() string {
 	es := make([]byte, 0, 4)
-	for i, e := range n.edges {
+	for i, e := range n.children {
 		if e != nil {
 			es = append(es, bit2base[i])
 		}
@@ -70,33 +64,18 @@ func (n *node) isLeaf() bool {
 	return n.leaf != nil
 }
 
-func (n *node) addEdge(e *edge) {
-	if n.edges == nil {
-		edges := [4]*edge{}
-		n.edges = &edges
-	}
-	n.edges[e.label] = e
-	n.edgesNum++
+func (n *node) addChild(label uint8, node *node) {
+	n.numChildren++
+	n.children[label] = node
 }
 
-func (n *node) updateEdge(label uint8, node *node) {
-	n.edges[label].node = node
+func (n *node) updateChild(label uint8, node *node) {
+	n.children[label] = node
 }
 
 // actually, it returns the node that the edge connects to
-func (n *node) getEdge(label uint8) *node {
-	if n.edges == nil {
-		return nil
-	}
-	if n.edges[label] == nil {
-		return nil
-	}
-	return n.edges[label].node
-}
-
-func (n *node) delEdge(label uint8) {
-	n.edges[label] = nil
-	n.edgesNum--
+func (n *node) getChild(label uint8) *node {
+	return n.children[label]
 }
 
 // Tree is a radix tree for storing bit-packed k-mer information
@@ -159,13 +138,12 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 
 		// Look for the edge
 		parent = n
-		n = n.getEdge(KmerBaseAt(search, k, 0))
+		n = n.getChild(KmerBaseAt(search, k, 0))
 
 		// No edge, create one
 		if n == nil {
-			e := &edge{
-				label: KmerBaseAt(search, k, 0),
-				node: &node{
+			parent.addChild(KmerBaseAt(search, k, 0),
+				&node{
 					leaf: &leafNode{
 						key: key0,
 						k:   k0,
@@ -173,9 +151,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 					},
 					prefix: search,
 					k:      k,
-				},
-			}
-			parent.addEdge(e)
+				})
 			t.numNodes++
 			t.numLeafNodes++
 			return nil, false
@@ -198,13 +174,10 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			k:      commonPrefix,
 		}
 		t.numNodes++
-		parent.updateEdge(KmerBaseAt(search, k, 0), child) // change from n to c
+		parent.updateChild(KmerBaseAt(search, k, 0), child) // change from n to c
 
 		// child points to n now
-		child.addEdge(&edge{
-			label: KmerBaseAt(n.prefix, n.k, commonPrefix),
-			node:  n,
-		})
+		child.addChild(KmerBaseAt(n.prefix, n.k, commonPrefix), n)
 		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
@@ -226,14 +199,12 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 
 		// the new key and the key of node n share a prefix shorter than both of them
 		// Create a new edge for the node
-		child.addEdge(&edge{
-			label: KmerBaseAt(search, k, 0),
-			node: &node{
+		child.addChild(KmerBaseAt(search, k, 0),
+			&node{
 				leaf:   leaf,
 				prefix: search,
 				k:      k,
-			},
-		})
+			})
 		t.numNodes++
 		return nil, false
 	}
@@ -254,7 +225,7 @@ func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 		}
 
 		// Look for an edge
-		n = n.getEdge(KmerBaseAt(search, k, 0))
+		n = n.getChild(KmerBaseAt(search, k, 0))
 		if n == nil { // not found
 			break
 		}
@@ -288,7 +259,7 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 		}
 
 		// Look for an edge
-		n = n.getEdge(KmerBaseAt(search, k, 0))
+		n = n.getChild(KmerBaseAt(search, k, 0))
 		if n == nil { // not found
 			break
 		}
@@ -364,7 +335,7 @@ func (t *Tree) Search(key uint64, k uint8, m uint8) (*[]*SearchResult, bool) {
 		}
 
 		// Look for an edge
-		n = n.getEdge(KmerBaseAt(search, k, 0))
+		n = n.getChild(KmerBaseAt(search, k, 0))
 		if n == nil {
 			break
 		}
@@ -442,7 +413,7 @@ func (t *Tree) LongestPrefix(key uint64, k uint8) (uint64, uint8, []uint64, bool
 		}
 
 		// Look for an edge
-		n = n.getEdge(KmerBaseAt(search, k, 0))
+		n = n.getChild(KmerBaseAt(search, k, 0))
 		if n == nil {
 			break
 		}
@@ -480,38 +451,38 @@ func recursiveWalk(n *node, fn WalkFn) bool {
 
 	// Recurse on the children
 	var i uint8
-	k := n.edgesNum // keeps track of number of edges in previous iteration
+	k := n.numChildren // keeps track of number of edges in previous iteration
 	for i < k {
-		e := nthEdge(n.edges, i)
-		if recursiveWalk(e.node, fn) {
+		child := nthChild(&n.children, i)
+		if recursiveWalk(child, fn) {
 			return true
 		}
 		// It is a possibility that the WalkFn modified the node we are
 		// iterating on. If there are no more edges, mergeChild happened,
 		// so the last edge became the current node n, on which we'll
 		// iterate one last time.
-		if n.edgesNum == 0 {
+		if n.numChildren == 0 {
 			return recursiveWalk(n, fn)
 		}
 		// If there are now less edges than in the previous iteration,
 		// then do not increment the loop index, since the current index
 		// points to a new edge. Otherwise, get to the next index.
-		if n.edgesNum >= k {
+		if n.numChildren >= k {
 			i++
 		}
-		k = n.edgesNum
+		k = n.numChildren
 	}
 	return false
 }
 
-func nthEdge(edges *[4]*edge, n uint8) *edge {
+func nthChild(children *[4]*node, n uint8) *node {
 	var j uint8
-	for _, e := range *edges {
-		if e == nil {
+	for _, child := range *children {
+		if child == nil {
 			continue
 		}
 		if j == n {
-			return e
+			return child
 		}
 		j++
 	}
