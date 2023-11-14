@@ -86,7 +86,7 @@ func (t *Tree) NumLeafNodes() int {
 
 // Insert is used to add a newentry or update
 // an existing entry. Returns true if an existing record is updated.
-func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
+func (t *Tree) Insert(key uint64, k uint8, v uint64) bool {
 	key0 := key // will save it into the leaf node
 	k0 := k     // will save it into the leaf node
 
@@ -97,13 +97,12 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		// Handle key exhaustion
 		if k == 0 {
 			if n.leaf != nil {
-				old := n.leaf.val
 				if n.leaf.val == nil {
 					n.leaf.val = []uint64{v}
 				} else {
 					n.leaf.val = append(n.leaf.val, v)
 				}
-				return old, true
+				return true
 			}
 
 			// n is not a leaf node, that means
@@ -115,7 +114,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			}
 			t.numLeafNodes++
 
-			return nil, false
+			return false
 		}
 
 		// Look for the child
@@ -138,7 +137,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 
 			t.numNodes++
 			t.numLeafNodes++
-			return nil, false
+			return false
 		}
 
 		// has a child -- exists a path
@@ -181,7 +180,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		k = k - commonPrefix
 		if k == 0 {
 			child.leaf = leaf
-			return nil, false
+			return false
 		}
 
 		// the new key and the key of node n share a prefix shorter than both of them
@@ -193,7 +192,7 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 		}
 		child.numChildren++
 		t.numNodes++
-		return nil, false
+		return false
 	}
 }
 

@@ -40,7 +40,7 @@ var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (>=4)")
 
 // LexicHash is for finding shared substrings between nucleotide sequences.
 type LexicHash struct {
-	K int // max lenth of shared substrings, should be in range of [9, 31]
+	K int // max length of shared substrings, should be in range of [4, 31]
 
 	Seed  int64    // seed for generating masks
 	Masks []uint64 // masks

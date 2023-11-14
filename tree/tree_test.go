@@ -53,7 +53,7 @@ func TestTree(t *testing.T) {
 		if v == 3 || v == 0 {
 			continue
 		}
-		_, _ = tree.Insert(i, uint8(k), v)
+		tree.Insert(i, uint8(k), v)
 	}
 
 	k = 6
@@ -64,7 +64,7 @@ func TestTree(t *testing.T) {
 		if v == 3 {
 			continue
 		}
-		_, _ = tree.Insert(i, uint8(k), v)
+		tree.Insert(i, uint8(k), v)
 	}
 
 	// t.Logf("number of edges: %d\n", tree.NumEdges())
@@ -115,7 +115,7 @@ func TestBigTree(t *testing.T) {
 		tree := New()
 
 		k := 21
-		nKmers := 50000 // or the number of sequences
+		nKmers := 10000 // or the number of sequences
 		var seed int64 = 1
 		seed = int64(i)
 
@@ -135,7 +135,7 @@ func TestBigTree(t *testing.T) {
 		}
 
 		for i, kmer := range codes {
-			_, _ = tree.Insert(kmer, uint8(k), uint64(i))
+			tree.Insert(kmer, uint8(k), uint64(i))
 		}
 
 		trees[i] = tree
@@ -143,13 +143,19 @@ func TestBigTree(t *testing.T) {
 	}
 
 	tree := trees[0]
+
+	// tree.Walk(func(code uint64, k uint8, v []uint64) bool {
+	// 	fmt.Printf("%s\n", kmers.Decode(code, int(k)))
+	// 	return false
+	// })
+
 	// t.Logf("number of edges: %d\n", tree.NumEdges())
 	t.Logf("number of nodes: %d\n", tree.NumNodes())
 	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
 
-	query := "TCCATCTATTCGCTAGCATCA"
+	query := "TCATTTAAGTCCAATCGTCAG"
 	code, _ := kmers.Encode([]byte(query))
-	srs, ok := tree.Search(code, uint8(len(query)), 13)
+	srs, ok := tree.Search(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("query: %s\n", query)
 	if ok {
 		for _, sr := range *srs {
