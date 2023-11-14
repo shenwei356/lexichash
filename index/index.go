@@ -28,7 +28,8 @@ import (
 	"sync"
 
 	"github.com/shenwei356/kmers"
-	tree "github.com/shenwei356/lexichash/tree"
+	"github.com/shenwei356/lexichash"
+	"github.com/shenwei356/lexichash/tree"
 )
 
 // ErrKConcurrentInsert occurs when calling Insert during calling BatchInsert.
@@ -37,7 +38,7 @@ var ErrKConcurrentInsert = errors.New("lexichash: concurrent insertion")
 // Index creates LexicHash index for mutitple reference sequences
 // and supports searching with a query sequence.
 type Index struct {
-	lh *LexicHash
+	lh *lexichash.LexicHash
 
 	// each record of the k-mer value is an uint64
 	//  ref idx: 26 bits
@@ -64,7 +65,7 @@ func NewIndex(k int, nMasks int, canonicalKmer bool) (*Index, error) {
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
 func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index, error) {
-	lh, err := NewWithSeed(k, nMasks, canonicalKmer, seed)
+	lh, err := lexichash.NewWithSeed(k, nMasks, canonicalKmer, seed)
 	if err != nil {
 		return nil, err
 	}
@@ -573,3 +574,6 @@ func (idx *Index) Paths(key uint64, k uint8, minPrefix uint8) []Path {
 	}
 	return paths
 }
+
+// Strands could be used to output strand for a reverse complement flag
+var Strands = [2]byte{'+', '-'}

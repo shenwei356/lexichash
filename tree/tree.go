@@ -21,6 +21,7 @@
 package tree
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/shenwei356/kmers"
@@ -28,40 +29,42 @@ import (
 
 // leafNode is used to represent a value
 type leafNode struct {
+	k   uint8    // lenght of bases of the key
 	key uint64   // ALL the bases in the node, the k-mer
 	val []uint64 // yes, multiple values
-	k   uint8    // lenght of bases of the key
 }
 
-// func (l leafNode) String() string {
-// 	return string(kmers.Decode(l.key, int(l.k)))
-// }
+func (l leafNode) String() string {
+	return fmt.Sprintf("%s with %d values", kmers.Decode(l.key, int(l.k)), len(l.val))
+}
 
 // edge is used to represent an edge node
 type edge struct {
-	node  *node // the child node it connects to
 	label uint8 // one base in 2-bit code
+	node  *node // the child node it connects to
 }
 
 // node represents a node in the tree, might be the root, inner or leaf node.
 type node struct {
-	leaf *leafNode // optional
-
 	prefix uint64 // prefix of the current node
 	k      uint8  // bases length of the prefix
 
 	edgesNum uint8
 	edges    *[4]*edge // just use a array
+
+	leaf *leafNode // optional
 }
 
-// func (n node) String() string {
-// 	es := make([]byte, len(n.edges))
-// 	for i, e := range n.edges {
-// 		es[i] = bit2base[e.label]
-// 	}
+func (n node) String() string {
+	es := make([]byte, 0, 4)
+	for i, e := range n.edges {
+		if e != nil {
+			es = append(es, bit2base[i])
+		}
+	}
 
-// 	return fmt.Sprintf("NODE: prefix: %s, edges: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf)
-// }
+	return fmt.Sprintf("NODE: prefix: %s, edges: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
+}
 
 func (n *node) isLeaf() bool {
 	return n.leaf != nil
@@ -102,7 +105,7 @@ type Tree struct {
 
 	numNodes     int
 	numLeafNodes int
-	numEdges     int
+	// numEdges     int
 }
 
 // Tree implements a radix tree for k-mer querying
@@ -119,11 +122,6 @@ func (t *Tree) NumNodes() int {
 // NumLeafNodes returns the number of leaf nodes
 func (t *Tree) NumLeafNodes() int {
 	return t.numLeafNodes
-}
-
-// NumEdges returns the number of edges
-func (t *Tree) NumEdges() int {
-	return t.numEdges
 }
 
 // Insert is used to add a newentry or update
@@ -180,7 +178,6 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			parent.addEdge(e)
 			t.numNodes++
 			t.numLeafNodes++
-			t.numEdges++
 			return nil, false
 		}
 
@@ -208,7 +205,6 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			label: KmerBaseAt(n.prefix, n.k, commonPrefix),
 			node:  n,
 		})
-		t.numEdges++
 		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
@@ -239,7 +235,6 @@ func (t *Tree) Insert(key uint64, k uint8, v uint64) ([]uint64, bool) {
 			},
 		})
 		t.numNodes++
-		t.numEdges++
 		return nil, false
 	}
 }

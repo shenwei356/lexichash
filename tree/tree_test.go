@@ -21,12 +21,22 @@
 package tree
 
 import (
+	"log"
 	"math/rand"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/shenwei356/kmers"
 )
+
+func TestStructSize(t *testing.T) {
+	log.Printf("struct: Sizeof, Alignof\n")
+	log.Printf("leafNode: %d, %d", unsafe.Sizeof(leafNode{}), unsafe.Alignof(leafNode{}))
+	log.Printf("edge: %d, %d", unsafe.Sizeof(edge{}), unsafe.Alignof(edge{}))
+	log.Printf("node: %d, %d", unsafe.Sizeof(node{}), unsafe.Alignof(node{}))
+
+}
 
 func TestTree(t *testing.T) {
 	tree := New()
@@ -58,7 +68,7 @@ func TestTree(t *testing.T) {
 		_, _ = tree.Insert(i, uint8(k), v)
 	}
 
-	t.Logf("number of edges: %d\n", tree.NumEdges())
+	// t.Logf("number of edges: %d\n", tree.NumEdges())
 	t.Logf("number of nodes: %d\n", tree.NumNodes())
 	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
 
@@ -134,7 +144,7 @@ func TestBigTree(t *testing.T) {
 	}
 
 	tree := trees[0]
-	t.Logf("number of edges: %d\n", tree.NumEdges())
+	// t.Logf("number of edges: %d\n", tree.NumEdges())
 	t.Logf("number of nodes: %d\n", tree.NumNodes())
 	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
 
