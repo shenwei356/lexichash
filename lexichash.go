@@ -277,7 +277,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	for i := range *hashes {
 		(*hashes)[i] = math.MaxUint64
 	}
-	var mask, hash, h uint64
+	var mask, hash, hashRC, h uint64
 	var kmer, kmerRC uint64
 	var ok bool
 	var i, j int
@@ -297,11 +297,12 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 				hash = kmer>>2 ^ mask
 
 				if hash <= h { // smaller hash value
-					(*hashes)[i] = hash
-					(*_kmers)[i] = kmer
 					locs = &(*locses)[i]
 					if hash < h {
 						*locs = (*locs)[:0]
+
+						(*hashes)[i] = hash
+						(*_kmers)[i] = kmer
 					}
 					*locs = append(*locs, j)
 				}
@@ -323,26 +324,19 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 			h = (*hashes)[i]
 
 			hash = kmer>>2 ^ mask
-			if hash <= h {
-				(*hashes)[i] = hash
-				(*_kmers)[i] = kmer
-				locs = &(*locses)[i]
-				if hash < h {
-					*locs = (*locs)[:0]
-				}
-				*locs = append(*locs, j)
-
-				h = (*hashes)[i] // do not forget to update h
+			hashRC = kmerRC>>2 ^ mask
+			if hashRC < hash {
+				hash = hashRC
+				kmer = kmerRC
 			}
 
-			// try both strands
-			hash = kmerRC>>2 ^ mask
 			if hash <= h {
-				(*hashes)[i] = hash
-				(*_kmers)[i] = kmerRC
 				locs = &(*locses)[i]
 				if hash < h {
 					*locs = (*locs)[:0]
+
+					(*hashes)[i] = hash
+					(*_kmers)[i] = kmer
 				}
 				*locs = append(*locs, j)
 			}
