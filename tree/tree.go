@@ -327,7 +327,8 @@ func (t *Tree) Search(key uint64, k uint8, m uint8) (*[]*SearchResult, bool) {
 		}
 
 		// Consume the search prefix
-		if KmerHasPrefix(search, n.prefix, k, n.k) {
+		// if KmerHasPrefix(search, n.prefix, k, n.k) {
+		if MustKmerHasPrefix(search, n.prefix, k, n.k) {
 			lenPrefix += n.k
 			// already matched at least m bases
 			// we can output all leaves below n
@@ -435,42 +436,11 @@ func recursiveWalk(n *node, fn WalkFn) bool {
 		return true
 	}
 
-	// Recurse on the children
-	var i uint8
-	k := n.numChildren // keeps track of number of children in previous iteration
-	for i < k {
-		child := nthChild(&n.children, i)
-		if recursiveWalk(child, fn) {
+	for _, child := range n.children {
+		if child != nil && recursiveWalk(child, fn) {
 			return true
 		}
-		// It is a possibility that the WalkFn modified the node we are
-		// iterating on. If there are no more children, mergeChild happened,
-		// so the last child became the current node n, on which we'll
-		// iterate one last time.
-		if n.numChildren == 0 {
-			return recursiveWalk(n, fn)
-		}
-		// If there are now less children than in the previous iteration,
-		// then do not increment the loop index, since the current index
-		// points to a new child. Otherwise, get to the next index.
-		if n.numChildren >= k {
-			i++
-		}
-		k = n.numChildren
 	}
-	return false
-}
 
-func nthChild(children *[4]*node, n uint8) *node {
-	var j uint8
-	for _, child := range *children {
-		if child == nil {
-			continue
-		}
-		if j == n {
-			return child
-		}
-		j++
-	}
-	return nil
+	return false
 }

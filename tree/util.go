@@ -53,16 +53,14 @@ func KmerSuffix(code uint64, k uint8, i uint8) uint64 {
 // KmerLongestPrefix returns the length of the longest prefix.
 func KmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
 	var d uint8
-	if k1 > k2 { // most of the cases
+	if k1 >= k2 { // most of the cases
 		code1 = code1 >> ((k1 - k2) << 1)
 		d = 32 - k2
-	} else if k1 == k2 {
-		d = 32 - k1
 	} else {
 		code2 = code2 >> ((k2 - k1) << 1)
 		d = 32 - k1
 	}
-	return uint8(bits.LeadingZeros64(code1^code2)/2) - d
+	return uint8(bits.LeadingZeros64(code1^code2)>>1) - d
 }
 
 // KmerHasPrefix check if a k-mer has a prefix
@@ -70,6 +68,11 @@ func KmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	if k1 < k2 {
 		return false
 	}
+	return code>>((k1-k2)<<1) == prefix
+}
+
+// MustKmerHasPrefix check if a k-mer has a prefix, without if branch.
+func MustKmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
 }
 

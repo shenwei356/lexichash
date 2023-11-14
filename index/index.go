@@ -377,14 +377,27 @@ func (r *SearchResult) Deduplicate() {
 	}
 
 	// sory by: start, end ,strand
-	sort.Slice(*r.Subs, func(i, j int) bool {
-		if (*r.Subs)[i][0].Begin == (*r.Subs)[j][0].Begin {
-			if (*r.Subs)[i][0].End == (*r.Subs)[j][0].End {
-				return (*r.Subs)[i][0].RC < (*r.Subs)[j][0].RC
+	// sort.Slice(*r.Subs, func(i, j int) bool {
+	// if (*r.Subs)[i][0].Begin == (*r.Subs)[j][0].Begin {
+	// 	if (*r.Subs)[i][0].End == (*r.Subs)[j][0].End {
+	// 		return (*r.Subs)[i][0].RC < (*r.Subs)[j][0].RC
+	// 	}
+	// 	return (*r.Subs)[i][0].End > (*r.Subs)[j][0].End
+	// }
+	// return (*r.Subs)[i][0].Begin < (*r.Subs)[j][0].Begin
+	//	})
+
+	_subs := *r.Subs
+	sort.Slice(_subs, func(i, j int) bool {
+		a := (_subs)[i][0]
+		b := (_subs)[j][0]
+		if a.Begin == b.Begin {
+			if a.End == b.End {
+				return a.RC < b.RC
 			}
-			return (*r.Subs)[i][0].End > (*r.Subs)[j][0].End
+			return a.End > b.End
 		}
-		return (*r.Subs)[i][0].Begin < (*r.Subs)[j][0].Begin
+		return a.Begin < b.Begin
 	})
 
 	subs := poolSubs.Get().(*[]*[2]Substr)
@@ -542,11 +555,19 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	}
 
 	// sort by score, id index
+	// sort.Slice(*rs, func(i, j int) bool {
+	// if (*rs)[i].Score() == (*rs)[j].Score() {
+	// 	return (*rs)[i].IdIdx < (*rs)[j].IdIdx
+	// }
+	// return (*rs)[i].Score() > (*rs)[j].Score()
+	// })
 	sort.Slice(*rs, func(i, j int) bool {
-		if (*rs)[i].Score() == (*rs)[j].Score() {
-			return (*rs)[i].IdIdx < (*rs)[j].IdIdx
+		a := (*rs)[i]
+		b := (*rs)[j]
+		if a.Score() == b.Score() {
+			return a.IdIdx < b.IdIdx
 		}
-		return (*rs)[i].Score() > (*rs)[j].Score()
+		return a.Score() > b.Score()
 	})
 
 	return rs, nil
