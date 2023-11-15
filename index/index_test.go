@@ -26,11 +26,18 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	"github.com/shenwei356/kmers"
 )
+
+func TestStructSize(t *testing.T) {
+	t.Logf("struct: Sizeof, Alignof\n")
+	t.Logf("Substr: %d, %d", unsafe.Sizeof(Substr{}), unsafe.Alignof(Substr{}))
+	t.Logf("SearchResult: %d, %d", unsafe.Sizeof(SearchResult{}), unsafe.Alignof(SearchResult{}))
+}
 
 func TestHash(t *testing.T) {
 	k := 21
@@ -65,7 +72,7 @@ func TestHash(t *testing.T) {
 			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 				v[0].Begin+1, v[0].End, Strands[v[0].RC],
 				v[1].Begin+1, v[1].End, Strands[v[1].RC],
-				v[0].K, v[0].KmerCode)
+				v[0].K, kmers.MustDecode(v[0].Code, int(v[0].K)))
 		}
 	}
 	idx.RecycleSearchResult(sr)
@@ -152,7 +159,7 @@ func TestIndex(t *testing.T) {
 				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 					v[0].Begin+1, v[0].End, Strands[v[0].RC],
 					v[1].Begin+1, v[1].End, Strands[v[1].RC],
-					v[0].K, v[0].KmerCode)
+					v[0].K, kmers.MustDecode(v[0].Code, int(v[0].K)))
 			}
 		}
 		idx.RecycleSearchResult(sr)

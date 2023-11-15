@@ -52,7 +52,7 @@ func TestKmerOperations(t *testing.T) {
 	// KmerPrefix
 	var p []byte
 	for i := 1; i <= len(kmer); i++ {
-		p = Kmer2dna(KmerPrefix(code, k, uint8(i)), i)
+		p = kmers.MustDecode(KmerPrefix(code, k, uint8(i)), i)
 		if !bytes.Equal(p, kmer[:i]) {
 			t.Errorf("KmerPrefix error: %d, expected %s, returned %s", i, kmer[:i], p)
 		}
@@ -61,7 +61,7 @@ func TestKmerOperations(t *testing.T) {
 	// KmerSuffix
 	var s []byte
 	for i := 0; i < len(kmer); i++ {
-		s = Kmer2dna(KmerSuffix(code, k, uint8(i)), len(kmer)-i)
+		s = kmers.MustDecode(KmerSuffix(code, k, uint8(i)), len(kmer)-i)
 		if !bytes.Equal(s, kmer[i:]) {
 			t.Errorf("KmerSuffix error: %d, expected %s, returned %s", i, kmer[i:], s)
 		}

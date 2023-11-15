@@ -23,15 +23,10 @@ package tree
 import (
 	"math/bits"
 
-	"github.com/shenwei356/kmers"
 	"github.com/twotwotwo/sorts/sortutil"
 )
 
 var bit2base = [4]byte{'A', 'C', 'G', 'T'}
-
-func Kmer2dna(code uint64, k int) []byte {
-	return kmers.Decode(code, k)
-}
 
 // KmerBaseAt returns the base in pos i (0-based).
 func KmerBaseAt(code uint64, k uint8, i uint8) uint8 {

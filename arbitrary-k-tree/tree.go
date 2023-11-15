@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/shenwei356/kmers"
+	"github.com/shenwei356/lexichash"
 )
 
 // leafNode is used to represent a value
@@ -35,7 +35,7 @@ type leafNode struct {
 }
 
 func (l leafNode) String() string {
-	return fmt.Sprintf("%s with %d values", kmers.Decode(l.key, int(l.k)), len(l.val))
+	return fmt.Sprintf("%s with %d values", lexichash.MustDecode(l.key, l.k), len(l.val))
 }
 
 // node represents a node in the tree, might be the root, inner or leaf node.
@@ -57,7 +57,7 @@ func (n node) String() string {
 		}
 	}
 
-	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
+	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", lexichash.MustDecode(n.prefix, n.k), es, n.leaf.String())
 }
 
 // Tree is a radix tree for storing bit-packed k-mer information
@@ -238,7 +238,7 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 		// Check for key exhaution
 		if k == 0 {
 			if n.leaf != nil {
-				nodes = append(nodes, string(kmers.Decode(n.leaf.key, int(n.leaf.k))))
+				nodes = append(nodes, string(lexichash.MustDecode(n.leaf.key, n.leaf.k)))
 				return nodes, matched
 			}
 			break
@@ -253,7 +253,7 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 		// Consume the search prefix
 		if KmerHasPrefix(search, n.prefix, k, n.k) {
 			matched += n.k
-			nodes = append(nodes, string(kmers.Decode(n.prefix, int(n.k))))
+			nodes = append(nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 			search = KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
@@ -265,7 +265,7 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 			//   A C AGGC
 			matched += KmerLongestPrefix(search, n.prefix, k, n.k)
 			if matched >= minPrefix {
-				nodes = append(nodes, string(kmers.Decode(n.prefix, int(n.k))))
+				nodes = append(nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 				break
 			}
 

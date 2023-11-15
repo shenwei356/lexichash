@@ -27,7 +27,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/shenwei356/kmers"
 	"github.com/shenwei356/lexichash"
 	"github.com/shenwei356/lexichash/tree"
 )
@@ -312,11 +311,11 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 
 // Substr represents a found substring.
 type Substr struct {
-	kmers.KmerCode // save substring in KmerCode
-
-	Begin int   // start position of the substring
-	End   int   // end position of the substring
-	RC    uint8 // a flag indicating if the substring from the negative strand (1 for yes)
+	Code  uint64 // k-mer
+	Begin int    // start position of the substring
+	End   int    // end position of the substring
+	RC    uint8  // a flag indicating if the substring from the negative strand (1 for yes)
+	K     uint8  // K size
 }
 
 // Equal tells if two Substr are the same.
@@ -325,7 +324,7 @@ func (s Substr) Equal(b Substr) bool {
 }
 
 func (s Substr) String() string {
-	return fmt.Sprintf("%s %d-%d rc: %d", s.KmerCode.String(), s.Begin, s.End, s.RC)
+	return fmt.Sprintf("%s %d-%d rc: %d", lexichash.MustDecode(s.Code, s.K), s.Begin, s.End, s.RC)
 }
 
 var pool2Subtr = &sync.Pool{New: func() interface{} {
@@ -333,7 +332,7 @@ var pool2Subtr = &sync.Pool{New: func() interface{} {
 }}
 
 var poolSubs = &sync.Pool{New: func() interface{} {
-	tmp := make([]*[2]Substr, 0, 1024)
+	tmp := make([]*[2]Substr, 0, 128)
 	return &tmp
 }}
 
@@ -477,28 +476,35 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 	var code uint64
 	var K, _k int
+	var _k8 uint8
 	var idIdx, pos, begin, end int
 	var rc uint8
 	trees := idx.Trees
 	K = idx.K()
-	for i, kmer = range *_kmers {
+	var locs []int
+	for i, kmer = range *_kmers { // captured k-mers by the maskes
 		// srs, ok := trees[i].Search(kmer>>2, uint8(k), minPrefix)
-		srs, ok := trees[i].Search(kmer>>2, minPrefix)
+		srs, ok := trees[i].Search(kmer>>2, minPrefix) // each on the corresponding tree
 		if !ok {
 			continue
 		}
 
+		locs = (*_locses)[i]
+
 		_rc = uint8(kmer & 1)
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
-		for _, sr := range *srs {
+		for _, sr := range *srs { // different k-mers
 			// fmt.Printf("    %s %d\n",
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
 			// 	sr.LenPrefix)
 
 			_k = int(sr.LenPrefix)
+			_k8 = sr.LenPrefix
 
-			for _, _pos = range (*_locses)[i] {
+			// multiple locations for each QUERY k-mer,
+			// but most of cases, there's only one.
+			for _, _pos = range locs {
 				// query
 				if _rc > 0 {
 					_begin, _end = _pos+K-_k, _pos+K
@@ -511,6 +517,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 				// matched
 				code = tree.KmerPrefix(sr.Kmer, uint8(K), sr.LenPrefix)
 
+				// multiple locations for each MATCHED k-mer
+				// but most of cases, there's only one.
 				for _, refpos = range sr.Values {
 					// fmt.Printf("      %s, %d, %c\n",
 					// 	idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
@@ -527,13 +535,13 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 					_sub2 := pool2Subtr.Get().(*[2]Substr)
 					(*_sub2)[0].Code = _code
-					(*_sub2)[0].K = _k
+					(*_sub2)[0].K = _k8
 					(*_sub2)[0].Begin = _begin
 					(*_sub2)[0].End = _end
 					(*_sub2)[0].RC = _rc
 
 					(*_sub2)[1].Code = code
-					(*_sub2)[1].K = _k
+					(*_sub2)[1].K = _k8
 					(*_sub2)[1].Begin = begin
 					(*_sub2)[1].End = end
 					(*_sub2)[1].RC = rc

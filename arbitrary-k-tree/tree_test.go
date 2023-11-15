@@ -27,6 +27,7 @@ import (
 	"unsafe"
 
 	"github.com/shenwei356/kmers"
+	"github.com/shenwei356/lexichash"
 )
 
 func TestStructSize(t *testing.T) {
@@ -70,7 +71,7 @@ func TestTree(t *testing.T) {
 	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
 
 	// tree.Walk(func(code uint64, k uint8, v []uint64) bool {
-	// 	t.Logf("%s, %v\n", kmers.Decode(code, int(k)), v)
+	// 	t.Logf("%s, %v\n", lexichash.MustDecode(code, k), v)
 	// 	return false
 	// })
 
@@ -85,7 +86,7 @@ func TestTree(t *testing.T) {
 	code, _ = kmers.Encode([]byte(query))
 	_code, _k, _r, ok := tree.LongestPrefix(code, uint8(len(query)))
 	if ok {
-		t.Logf("  %s, %v, %v\n", kmers.Decode(_code, int(_k)), _r, ok)
+		t.Logf("  %s, %v, %v\n", lexichash.MustDecode(_code, _k), _r, ok)
 	}
 
 	query = "ACGCA"
@@ -94,7 +95,7 @@ func TestTree(t *testing.T) {
 	t.Logf("query: %s\n", query)
 	for _, sr := range *srs {
 		t.Logf("  %s, len(prefix): %d, %v\n",
-			kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
+			lexichash.MustDecode(sr.Kmer, sr.K), sr.LenPrefix, sr.Values)
 	}
 	tree.RecycleSearchResult(srs)
 
@@ -143,7 +144,7 @@ func TestBigTree(t *testing.T) {
 	tree := trees[0]
 
 	// tree.Walk(func(code uint64, k uint8, v []uint64) bool {
-	// 	fmt.Printf("%s\n", kmers.Decode(code, int(k)))
+	// 	fmt.Printf("%s\n",lexichash.MustDecode(code, k))
 	// 	return false
 	// })
 
@@ -158,7 +159,7 @@ func TestBigTree(t *testing.T) {
 	if ok {
 		for _, sr := range *srs {
 			t.Logf("  %s, len(prefix): %d, %v\n",
-				kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
+				lexichash.MustDecode(sr.Kmer, sr.K), sr.LenPrefix, sr.Values)
 		}
 		tree.RecycleSearchResult(srs)
 	}

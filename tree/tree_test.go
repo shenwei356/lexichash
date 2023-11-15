@@ -27,6 +27,7 @@ import (
 	"unsafe"
 
 	"github.com/shenwei356/kmers"
+	"github.com/shenwei356/lexichash"
 )
 
 func TestStructSize(t *testing.T) {
@@ -38,7 +39,7 @@ func TestStructSize(t *testing.T) {
 }
 
 func TestTree(t *testing.T) {
-	k := 6
+	var k uint8 = 6
 	n := uint64(1 << (k * 2))
 	var i uint64
 
@@ -79,7 +80,7 @@ func TestTree(t *testing.T) {
 	// _code, _k, _r, ok := tree.LongestPrefix(code, uint8(len(query)))
 	_code, _r, ok := tree.LongestPrefix(code)
 	if ok {
-		t.Logf("  %s, %v, %v\n", kmers.Decode(_code, k), _r, ok)
+		t.Logf("  %s, %v, %v\n", lexichash.MustDecode(_code, k), _r, ok)
 	}
 
 	query = "ACTGAA"
@@ -89,7 +90,7 @@ func TestTree(t *testing.T) {
 	t.Logf("query: %s\n", query)
 	for _, sr := range *srs {
 		t.Logf("  %s, len(prefix): %d, %v\n",
-			kmers.Decode(sr.Kmer, k), sr.LenPrefix, sr.Values)
+			lexichash.MustDecode(sr.Kmer, k), sr.LenPrefix, sr.Values)
 	}
 	tree.RecycleSearchResult(srs)
 
