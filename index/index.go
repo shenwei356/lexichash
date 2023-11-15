@@ -29,6 +29,7 @@ import (
 
 	"github.com/shenwei356/lexichash"
 	"github.com/shenwei356/lexichash/tree"
+	"github.com/twotwotwo/sorts"
 )
 
 // ErrKConcurrentInsert occurs when calling Insert during calling BatchInsert.
@@ -309,30 +310,43 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 
 // ---------------------------- for Search ----------------------------------
 
-// Substr represents a found substring.
-type Substr struct {
-	Code  uint64 // k-mer
-	Begin int    // start position of the substring
-	End   int    // end position of the substring
-	RC    uint8  // a flag indicating if the substring from the negative strand (1 for yes)
-	K     uint8  // K size
+// SubstrPair represents a pair of found substrings.
+type SubstrPair struct {
+	QRC uint8 // a flag indicating if the substring from the negative strand (1 for yes)
+	QK  uint8 // K size
+	TRC uint8 // a flag indicating if the substring from the negative strand (1 for yes)
+	TK  uint8 // K size
+
+	// query
+	QCode  uint64 // k-mer
+	QBegin int    // start position of the substring
+	QEnd   int    // end position of the substring
+
+	// target
+	TCode  uint64 // k-mer
+	TBegin int    // start position of the substring
+	TEnd   int    // end position of the substring
+
 }
 
-// Equal tells if two Substr are the same.
-func (s Substr) Equal(b Substr) bool {
-	return s.K == b.K && s.Code == b.Code && s.Begin == b.Begin && s.RC == b.RC
+// Equal tells if two SubstrPair are the same.
+func (s *SubstrPair) Equal(b *SubstrPair) bool {
+	return s.QK == b.QK && s.QCode == b.QCode && s.QBegin == b.QBegin && s.QRC == b.QRC &&
+		s.TK == b.TK && s.TCode == b.TCode && s.TBegin == b.TBegin && s.TRC == b.TRC
 }
 
-func (s Substr) String() string {
-	return fmt.Sprintf("%s %d-%d rc: %d", lexichash.MustDecode(s.Code, s.K), s.Begin, s.End, s.RC)
+func (s SubstrPair) String() string {
+	return fmt.Sprintf("%s %d-%d rc: %d vs %s %d-%d rc: %d",
+		lexichash.MustDecode(s.QCode, s.QK), s.QBegin, s.QEnd, s.QRC,
+		lexichash.MustDecode(s.TCode, s.TK), s.TBegin, s.TEnd, s.TRC)
 }
 
-var pool2Subtr = &sync.Pool{New: func() interface{} {
-	return &[2]Substr{}
+var poolSub = &sync.Pool{New: func() interface{} {
+	return &SubstrPair{}
 }}
 
 var poolSubs = &sync.Pool{New: func() interface{} {
-	tmp := make([]*[2]Substr, 0, 128)
+	tmp := make([]*SubstrPair, 0, 128)
 	return &tmp
 }}
 
@@ -347,9 +361,9 @@ var poolSearchResults = &sync.Pool{New: func() interface{} {
 
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
-	IdIdx int           // index of the matched reference ID
-	score float64       // score for sorting
-	Subs  *[]*[2]Substr // matched substring pairs (query,target)
+	IdIdx int            // index of the matched reference ID
+	score float64        // score for sorting
+	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
 	scoring bool // is score computed
 	cleaned bool // is duplicates removed
@@ -370,11 +384,43 @@ func (r *SearchResult) Score() float64 {
 	}
 
 	for _, v := range *r.Subs {
-		r.score += float64(v[0].K)
+		r.score += float64(v.QK)
 	}
 
 	r.scoring = true
 	return r.score
+}
+
+type SearchResults []*SearchResult
+
+func (s SearchResults) Len() int      { return len(s) }
+func (s SearchResults) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s SearchResults) Less(i, j int) bool {
+	a := s[i]
+	b := s[j]
+	if a.Score() == b.Score() {
+		return a.IdIdx < b.IdIdx
+	}
+	return a.Score() > b.Score()
+}
+
+type pairs []*SubstrPair
+
+func (s pairs) Len() int      { return len(s) }
+func (s pairs) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s pairs) Less(i, j int) bool {
+	a := s[i]
+	b := s[j]
+	if a.QBegin == b.QBegin {
+		if a.QEnd == b.QEnd {
+			if a.QRC == b.QRC {
+				return a.TBegin < b.TBegin
+			}
+			return a.QRC < b.QRC
+		}
+		return a.QEnd > b.QEnd
+	}
+	return a.QBegin < b.QBegin
 }
 
 // Deduplicate removes duplicated substrings
@@ -384,40 +430,34 @@ func (r *SearchResult) Deduplicate() {
 		return
 	}
 
-	// sory by: start, end ,strand
-	// sort.Slice(*r.Subs, func(i, j int) bool {
-	// if (*r.Subs)[i][0].Begin == (*r.Subs)[j][0].Begin {
-	// 	if (*r.Subs)[i][0].End == (*r.Subs)[j][0].End {
-	// 		return (*r.Subs)[i][0].RC < (*r.Subs)[j][0].RC
-	// 	}
-	// 	return (*r.Subs)[i][0].End > (*r.Subs)[j][0].End
-	// }
-	// return (*r.Subs)[i][0].Begin < (*r.Subs)[j][0].Begin
-	//	})
-
 	_subs := *r.Subs
 	sort.Slice(_subs, func(i, j int) bool {
-		a := (_subs)[i][0]
-		b := (_subs)[j][0]
-		if a.Begin == b.Begin {
-			if a.End == b.End {
-				return a.RC < b.RC
+		a := _subs[i]
+		b := _subs[j]
+		if a.QBegin == b.QBegin {
+			if a.QEnd == b.QEnd {
+				if a.QRC == b.QRC {
+					return a.TBegin < b.TBegin
+				}
+				return a.QRC < b.QRC
 			}
-			return a.End > b.End
+			return a.QEnd > b.QEnd
 		}
-		return a.Begin < b.Begin
+		return a.QBegin < b.QBegin
 	})
+	// sorts.Quicksort(pairs(*r.Subs))
 
-	subs := poolSubs.Get().(*[]*[2]Substr)
+	subs := poolSubs.Get().(*[]*SubstrPair)
 	*subs = (*subs)[:1]
 
-	var p, v *[2]Substr
+	var p, v *SubstrPair
 	p = (*r.Subs)[0]
 	(*subs)[0] = p
 	for _, v = range (*r.Subs)[1:] {
-		if (v[0].Equal(p[0]) && v[1].Equal(p[1])) || // the same
-			v[0].End <= p[0].End { // or nested region
-			pool2Subtr.Put(v)
+		// if v.Equal(p) || // the same
+		// 	v.QEnd <= p.QEnd { // or nested region
+		if v.QEnd <= p.QEnd && v.TEnd <= p.TEnd { // same or nested region
+			poolSub.Put(v)
 			continue
 		}
 		*subs = append(*subs, v)
@@ -436,8 +476,8 @@ func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
 	}
 
 	for _, r := range *sr {
-		for _, v := range *r.Subs {
-			pool2Subtr.Put(v)
+		for _, sub := range *r.Subs {
+			poolSub.Put(sub)
 		}
 		poolSubs.Put(r.Subs)
 		poolSearchResult.Put(r)
@@ -533,22 +573,22 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 						begin, end = pos, pos+_k
 					}
 
-					_sub2 := pool2Subtr.Get().(*[2]Substr)
-					(*_sub2)[0].Code = _code
-					(*_sub2)[0].K = _k8
-					(*_sub2)[0].Begin = _begin
-					(*_sub2)[0].End = _end
-					(*_sub2)[0].RC = _rc
+					_sub2 := poolSub.Get().(*SubstrPair)
+					_sub2.QCode = _code
+					_sub2.QK = _k8
+					_sub2.QBegin = _begin
+					_sub2.QEnd = _end
+					_sub2.QRC = _rc
 
-					(*_sub2)[1].Code = code
-					(*_sub2)[1].K = _k8
-					(*_sub2)[1].Begin = begin
-					(*_sub2)[1].End = end
-					(*_sub2)[1].RC = rc
+					_sub2.TCode = code
+					_sub2.TK = _k8
+					_sub2.TBegin = begin
+					_sub2.TEnd = end
+					_sub2.TRC = rc
 
 					var r *SearchResult
 					if r, ok = (*m)[idIdx]; !ok {
-						subs := poolSubs.Get().(*[]*[2]Substr)
+						subs := poolSubs.Get().(*[]*SubstrPair)
 						*subs = (*subs)[:0]
 
 						r = poolSearchResult.Get().(*SearchResult)
@@ -584,19 +624,15 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 	// sort by score, id index
 	// sort.Slice(*rs, func(i, j int) bool {
-	// if (*rs)[i].Score() == (*rs)[j].Score() {
-	// 	return (*rs)[i].IdIdx < (*rs)[j].IdIdx
-	// }
-	// return (*rs)[i].Score() > (*rs)[j].Score()
-	// })
-	sort.Slice(*rs, func(i, j int) bool {
-		a := (*rs)[i]
-		b := (*rs)[j]
-		if a.Score() == b.Score() {
-			return a.IdIdx < b.IdIdx
-		}
-		return a.Score() > b.Score()
-	})
+	// 	a := (*rs)[i]
+	// 	b := (*rs)[j]
+	// 	if a.Score() == b.Score() {
+	// 		return a.IdIdx < b.IdIdx
+	// 	}
+	// 	return a.Score() > b.Score()
+	// })rs)
+
+	sorts.Quicksort(SearchResults(*rs))
 
 	return rs, nil
 }

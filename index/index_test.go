@@ -35,7 +35,7 @@ import (
 
 func TestStructSize(t *testing.T) {
 	t.Logf("struct: Sizeof, Alignof\n")
-	t.Logf("Substr: %d, %d", unsafe.Sizeof(Substr{}), unsafe.Alignof(Substr{}))
+	t.Logf("SubstrPair: %d, %d", unsafe.Sizeof(SubstrPair{}), unsafe.Alignof(SubstrPair{}))
 	t.Logf("SearchResult: %d, %d", unsafe.Sizeof(SearchResult{}), unsafe.Alignof(SearchResult{}))
 }
 
@@ -70,9 +70,9 @@ func TestHash(t *testing.T) {
 		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 		for _, v := range *r.Subs {
 			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-				v[0].Begin+1, v[0].End, Strands[v[0].RC],
-				v[1].Begin+1, v[1].End, Strands[v[1].RC],
-				v[0].K, kmers.MustDecode(v[0].Code, int(v[0].K)))
+				v.QBegin+1, v.QEnd, Strands[v.QRC],
+				v.TBegin+1, v.TEnd, Strands[v.TRC],
+				v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
 		}
 	}
 	idx.RecycleSearchResult(sr)
@@ -157,9 +157,9 @@ func TestIndex(t *testing.T) {
 			t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 			for _, v := range *r.Subs {
 				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-					v[0].Begin+1, v[0].End, Strands[v[0].RC],
-					v[1].Begin+1, v[1].End, Strands[v[1].RC],
-					v[0].K, kmers.MustDecode(v[0].Code, int(v[0].K)))
+					v.QBegin+1, v.QEnd, Strands[v.QRC],
+					v.TBegin+1, v.TEnd, Strands[v.TRC],
+					v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
 			}
 		}
 		idx.RecycleSearchResult(sr)
