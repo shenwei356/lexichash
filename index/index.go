@@ -118,7 +118,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 				//  ref idx: 26 bits
 				//  pos:     36 bits
 				//  strand:   2 bits
-				refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+				refpos = uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1
 
 				idx.Trees[i].Insert(kmer>>2, refpos)
 			}
@@ -157,7 +157,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 					//  ref idx: 26 bits
 					//  pos:     36 bits
 					//  strand:   2 bits
-					refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
+					refpos := uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1
 					idx.Trees[i].Insert(kmer>>2, refpos)
 				}
 			}
@@ -224,14 +224,19 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 
 		// insert to tree
 		go func() {
-			for m := range ch {
-				var wg sync.WaitGroup
-				tokens := make(chan int, Threads)
+			var wg sync.WaitGroup
+			tokens := make(chan int, Threads)
+			trees := idx.Trees
+			var nMasks int
+			var n int
+			var j, start, end int
+			var refIdx uint32
 
-				nMasks := len(*(m.Kmers))
-				n := nMasks/Threads + 1
-				var start, end int
-				for j := 0; j <= Threads; j++ {
+			for m := range ch {
+				nMasks = len(*(m.Kmers))
+				n = nMasks/Threads + 1
+				refIdx = idx.i
+				for j = 0; j <= Threads; j++ {
 					start, end = j*n, (j+1)*n
 					if end > nMasks {
 						end = nMasks
@@ -248,8 +253,8 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 								//  ref idx: 26 bits
 								//  pos:     36 bits
 								//  strand:   2 bits
-								refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-								idx.Trees[i].Insert(kmer>>2, refpos)
+								refpos := uint64(refIdx)<<38 | uint64(loc)<<2 | kmer&1
+								trees[i].Insert(kmer>>2, refpos)
 							}
 						}
 						wg.Done()
@@ -441,6 +446,11 @@ func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
 	poolSearchResults.Put(sr)
 }
 
+var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
+	m := make(map[int]*SearchResult, 1024)
+	return &m
+}}
+
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
@@ -455,7 +465,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var kmer uint64
 	// k := idx.lh.K
 
-	m := make(map[int]*SearchResult) // IdIdex -> result
+	// m := make(map[int]*SearchResult) // IdIdex -> result
+	m := poolSearchResultsMap.Get().(*map[int]*SearchResult)
+	clear(*m)
 
 	// query substring
 	var _code uint64
@@ -467,9 +479,11 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var K, _k int
 	var idIdx, pos, begin, end int
 	var rc uint8
+	trees := idx.Trees
+	K = idx.K()
 	for i, kmer = range *_kmers {
-		// srs, ok := idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
-		srs, ok := idx.Trees[i].Search(kmer>>2, minPrefix)
+		// srs, ok := trees[i].Search(kmer>>2, uint8(k), minPrefix)
+		srs, ok := trees[i].Search(kmer>>2, minPrefix)
 		if !ok {
 			continue
 		}
@@ -482,7 +496,6 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
 			// 	sr.LenPrefix)
 
-			K = int(idx.lh.K)
 			_k = int(sr.LenPrefix)
 
 			for _, _pos = range (*_locses)[i] {
@@ -526,7 +539,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					(*_sub2)[1].RC = rc
 
 					var r *SearchResult
-					if r, ok = m[idIdx]; !ok {
+					if r, ok = (*m)[idIdx]; !ok {
 						subs := poolSubs.Get().(*[]*[2]Substr)
 						*subs = (*subs)[:0]
 
@@ -537,7 +550,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 						r.scoring = false
 						r.score = 0
 
-						m[idIdx] = r
+						(*m)[idIdx] = r
 					}
 
 					*r.Subs = append(*r.Subs, _sub2)
@@ -545,19 +558,21 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			}
 		}
 
-		idx.Trees[i].RecycleSearchResult(srs)
+		trees[i].RecycleSearchResult(srs)
 	}
 
-	if len(m) == 0 {
+	if len(*m) == 0 {
 		return nil, nil
 	}
 
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
-	for _, r := range m {
+	for _, r := range *m {
 		r.Deduplicate()
 		*rs = append(*rs, r)
 	}
+
+	poolSearchResultsMap.Put(m)
 
 	// sort by score, id index
 	// sort.Slice(*rs, func(i, j int) bool {

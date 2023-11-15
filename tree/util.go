@@ -71,7 +71,7 @@ func KmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
 }
 
-// MustKmerHasPrefix check if a k-mer has a prefix, without if branch.
+// MustKmerHasPrefix check if a k-mer has a prefix, by assuming k1>=k2.
 func MustKmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
 }

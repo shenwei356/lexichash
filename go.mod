@@ -1,6 +1,6 @@
 module github.com/shenwei356/lexichash
 
-go 1.20
+go 1.21
 
 require (
 	github.com/shenwei356/bio v0.9.2
