@@ -21,6 +21,7 @@
 package tree
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/shenwei356/kmers"
@@ -28,8 +29,13 @@ import (
 
 // leafNode is used to represent a value
 type leafNode struct {
+	k   uint8    // lenght of bases of the key
 	key uint64   // ALL the bases in the node, the k-mer
 	val []uint64 // yes, multiple values
+}
+
+func (l leafNode) String() string {
+	return fmt.Sprintf("%s with %d values", kmers.Decode(l.key, int(l.k)), len(l.val))
 }
 
 // node represents a node in the tree, might be the root, inner or leaf node.
@@ -43,20 +49,19 @@ type node struct {
 	leaf *leafNode // optional
 }
 
-// func (n node) String() string {
-// 	es := make([]byte, 0, 4)
-// 	for i, e := range n.children {
-// 		if e != nil {
-// 			es = append(es, bit2base[i])
-// 		}
-// 	}
+func (n node) String() string {
+	es := make([]byte, 0, 4)
+	for i, e := range n.children {
+		if e != nil {
+			es = append(es, bit2base[i])
+		}
+	}
 
-// 	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
-// }
+	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", kmers.Decode(n.prefix, int(n.k)), es, n.leaf.String())
+}
 
 // Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
-	k    uint8 // use a global K
 	root *node // root node
 
 	numNodes     int
@@ -64,14 +69,9 @@ type Tree struct {
 }
 
 // Tree implements a radix tree for k-mer querying
-func New(k uint8) *Tree {
-	t := &Tree{k: k, root: &node{}}
+func New() *Tree {
+	t := &Tree{root: &node{}}
 	return t
-}
-
-// K returns the K value
-func (t *Tree) K() int {
-	return int(t.k)
 }
 
 // NumNodes returns the number of nodes
@@ -86,9 +86,9 @@ func (t *Tree) NumLeafNodes() int {
 
 // Insert is used to add a newentry or update
 // an existing entry. Returns true if an existing record is updated.
-func (t *Tree) Insert(key uint64, v uint64) bool {
+func (t *Tree) Insert(key uint64, k uint8, v uint64) bool {
 	key0 := key // will save it into the leaf node
-	k := t.k
+	k0 := k     // will save it into the leaf node
 
 	var parent *node
 	n := t.root
@@ -109,6 +109,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 			// the current key is a prefix of some other keys.
 			n.leaf = &leafNode{
 				key: key0,
+				k:   k0,
 				val: []uint64{v},
 			}
 			t.numLeafNodes++
@@ -126,6 +127,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 			parent.children[firstBase] = &node{
 				leaf: &leafNode{
 					key: key0,
+					k:   k0,
 					val: []uint64{v},
 				},
 				prefix: search,
@@ -168,6 +170,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 		// Create a new leaf node for the new key
 		leaf := &leafNode{
 			key: key0,
+			k:   k0,
 			val: []uint64{v},
 		}
 		t.numLeafNodes++
@@ -195,10 +198,9 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 
 // Get is used to lookup a specific key, returning
 // the value and if it was found
-func (t *Tree) Get(key uint64) ([]uint64, bool) {
+func (t *Tree) Get(key uint64, k uint8) ([]uint64, bool) {
 	n := t.root
 	search := key
-	k := t.k
 	for {
 		// Check for key exhaution
 		if k == 0 {
@@ -227,17 +229,16 @@ func (t *Tree) Get(key uint64) ([]uint64, bool) {
 
 // Path returns the path of a key, i.e., the nodes list.
 // and the number of visited/matched bases.
-func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
+func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 	n := t.root
 	search := key
-	k := t.k
 	nodes := make([]string, 0, k)
 	var matched uint8
 	for {
 		// Check for key exhaution
 		if k == 0 {
 			if n.leaf != nil {
-				nodes = append(nodes, string(kmers.Decode(n.leaf.key, int(k))))
+				nodes = append(nodes, string(kmers.Decode(n.leaf.key, int(n.leaf.k))))
 				return nodes, matched
 			}
 			break
@@ -277,6 +278,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 // SearchResult records information of a search result
 type SearchResult struct {
 	Kmer      uint64   // searched kmer
+	K         uint8    // k
 	LenPrefix uint8    // length of common prefix between the query and this k-mer
 	Values    []uint64 // value of this key
 }
@@ -300,11 +302,10 @@ func (idx *Tree) RecycleSearchResult(sr *[]*SearchResult) {
 
 // Search finds keys that shared prefixes at least m bases.
 // After using the result, do not forget to call RecycleSearchResult()
-func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
+func (t *Tree) Search(key uint64, k uint8, m uint8) (*[]*SearchResult, bool) {
 	if m < 1 {
 		m = 1
 	}
-	k := t.k
 	if m > k {
 		m = k
 	}
@@ -364,13 +365,13 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	results := poolSearchResults.Get().(*[]*SearchResult)
 	*results = (*results)[:0]
 
-	k = t.k
 	var npre uint8
-	recursiveWalk(target, func(key uint64, v []uint64) bool {
+	recursiveWalk(target, func(key uint64, k uint8, v []uint64) bool {
 		npre = KmerLongestPrefix(key0, key, k0, k)
 
 		r := poolSearchResult.Get().(*SearchResult)
 		r.Kmer = key
+		r.K = k
 		r.LenPrefix = npre
 		r.Values = v
 
@@ -383,11 +384,10 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 
 // LongestPrefix is like Get, but instead of an
 // exact match, it will return the longest prefix match.
-func (t *Tree) LongestPrefix(key uint64) (uint64, []uint64, bool) {
+func (t *Tree) LongestPrefix(key uint64, k uint8) (uint64, uint8, []uint64, bool) {
 	var last *leafNode
 	n := t.root
 	search := key
-	k := t.k
 	for {
 		// Look for a leaf node
 		if n.leaf != nil {
@@ -414,16 +414,15 @@ func (t *Tree) LongestPrefix(key uint64) (uint64, []uint64, bool) {
 		}
 	}
 	if last != nil {
-		return last.key, last.val, true
+		return last.key, last.k, last.val, true
 	}
-	return 0, nil, false
+	return 0, 0, nil, false
 }
 
 // WalkFn is used when walking the tree. Takes a
 // key and value, returning if iteration should
 // be terminated.
-// type WalkFn func(key uint64, k uint8, v []uint64) bool
-type WalkFn func(key uint64, v []uint64) bool
+type WalkFn func(key uint64, k uint8, v []uint64) bool
 
 // Walk is used to walk the tree
 func (t *Tree) Walk(fn WalkFn) {
@@ -433,7 +432,7 @@ func (t *Tree) Walk(fn WalkFn) {
 // recursiveWalk is used to do a pre-order walk of a node
 // recursively. Returns true if the walk should be aborted
 func recursiveWalk(n *node, fn WalkFn) bool {
-	if n.leaf != nil && fn(n.leaf.key, n.leaf.val) {
+	if n.leaf != nil && fn(n.leaf.key, n.leaf.k, n.leaf.val) {
 		return true
 	}
 

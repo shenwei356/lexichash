@@ -39,6 +39,7 @@ var ErrKConcurrentInsert = errors.New("lexichash: concurrent insertion")
 // and supports searching with a query sequence.
 type Index struct {
 	lh *lexichash.LexicHash
+	k  uint8
 
 	// each record of the k-mer value is an uint64
 	//  ref idx: 26 bits
@@ -73,17 +74,23 @@ func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index
 	// create a tree for each mask
 	trees := make([]*tree.Tree, len(lh.Masks))
 	for i := range trees {
-		trees[i] = tree.New()
+		trees[i] = tree.New(uint8(k))
 	}
 
 	idx := &Index{
 		lh:    lh,
+		k:     uint8(k),
 		Trees: trees,
 		IDs:   make([][]byte, 0, 128),
 		i:     0,
 	}
 
 	return idx, nil
+}
+
+// K returns the K value
+func (idx *Index) K() int {
+	return int(idx.k)
 }
 
 // Threads is the maximum concurrency number for Insert().
@@ -106,7 +113,6 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 	if Threads == 1 {
 		var loc int
 		var refpos uint64
-		k := uint8(idx.lh.K)
 		for i, kmer := range *_kmers {
 			for _, loc = range (*locses)[i] {
 				//  ref idx: 26 bits
@@ -114,7 +120,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 				//  strand:   2 bits
 				refpos = uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
 
-				idx.Trees[i].Insert(kmer>>2, k, refpos)
+				idx.Trees[i].Insert(kmer>>2, refpos)
 			}
 		}
 
@@ -131,7 +137,6 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 	var wg sync.WaitGroup
 	tokens := make(chan int, Threads)
 
-	k := uint8(idx.lh.K)
 	nMasks := len(*_kmers)
 	n := nMasks/Threads + 1
 	var start, end int
@@ -153,7 +158,7 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 					//  pos:     36 bits
 					//  strand:   2 bits
 					refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-					idx.Trees[i].Insert(kmer>>2, k, refpos)
+					idx.Trees[i].Insert(kmer>>2, refpos)
 				}
 			}
 			wg.Done()
@@ -223,7 +228,6 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 				var wg sync.WaitGroup
 				tokens := make(chan int, Threads)
 
-				k := uint8(idx.lh.K)
 				nMasks := len(*(m.Kmers))
 				n := nMasks/Threads + 1
 				var start, end int
@@ -245,7 +249,7 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 								//  pos:     36 bits
 								//  strand:   2 bits
 								refpos := uint64(uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1)
-								idx.Trees[i].Insert(kmer>>2, k, refpos)
+								idx.Trees[i].Insert(kmer>>2, refpos)
 							}
 						}
 						wg.Done()
@@ -449,7 +453,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var refpos uint64
 	var i int
 	var kmer uint64
-	k := idx.lh.K
+	// k := idx.lh.K
 
 	m := make(map[int]*SearchResult) // IdIdex -> result
 
@@ -464,7 +468,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var idIdx, pos, begin, end int
 	var rc uint8
 	for i, kmer = range *_kmers {
-		srs, ok := idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
+		// srs, ok := idx.Trees[i].Search(kmer>>2, uint8(k), minPrefix)
+		srs, ok := idx.Trees[i].Search(kmer>>2, minPrefix)
 		if !ok {
 			continue
 		}
@@ -477,7 +482,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
 			// 	sr.LenPrefix)
 
-			K = int(sr.K)
+			K = int(idx.lh.K)
 			_k = int(sr.LenPrefix)
 
 			for _, _pos = range (*_locses)[i] {
@@ -488,10 +493,10 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					_begin, _end = _pos, _pos+_k
 				}
 
-				_code = tree.KmerPrefix(kmer>>2, sr.K, sr.LenPrefix)
+				_code = tree.KmerPrefix(kmer>>2, uint8(K), sr.LenPrefix)
 
 				// matched
-				code = tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix)
+				code = tree.KmerPrefix(sr.Kmer, uint8(K), sr.LenPrefix)
 
 				for _, refpos = range sr.Values {
 					// fmt.Printf("      %s, %d, %c\n",
@@ -588,7 +593,8 @@ func (idx *Index) Paths(key uint64, k uint8, minPrefix uint8) []Path {
 	paths := make([]Path, 0, 8)
 	for i, tree := range idx.Trees {
 		var nodes []string
-		nodes, bases = tree.Path(key, uint8(k), minPrefix)
+		// nodes, bases = tree.Path(key, uint8(k), minPrefix)
+		nodes, bases = tree.Path(key, minPrefix)
 		if bases >= minPrefix {
 			paths = append(paths, Path{TreeIdx: i, Nodes: nodes, Bases: bases})
 		}

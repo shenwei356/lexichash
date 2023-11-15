@@ -33,16 +33,14 @@ func TestStructSize(t *testing.T) {
 	t.Logf("struct: Sizeof, Alignof\n")
 	t.Logf("leafNode: %d, %d", unsafe.Sizeof(leafNode{}), unsafe.Alignof(leafNode{}))
 	t.Logf("node: %d, %d", unsafe.Sizeof(node{}), unsafe.Alignof(node{}))
-	t.Logf("SearchResult: %d, %d", unsafe.Sizeof(SearchResult{}), unsafe.Alignof(SearchResult{}))
-
 }
 
 func TestTree(t *testing.T) {
-	k := 6
+	tree := New()
+
+	k := 4
 	n := uint64(1 << (k * 2))
 	var i uint64
-
-	tree := New(uint8(k))
 
 	var v uint64
 	var r []uint64
@@ -53,8 +51,18 @@ func TestTree(t *testing.T) {
 		if v == 3 || v == 0 {
 			continue
 		}
-		// tree.Insert(i, uint8(k), v)
-		tree.Insert(i, v)
+		tree.Insert(i, uint8(k), v)
+	}
+
+	k = 6
+	n = uint64(1 << (k * 2))
+
+	for i = 0; i < n; i++ {
+		v = (i >> 4) & 3
+		if v == 3 {
+			continue
+		}
+		tree.Insert(i, uint8(k), v)
 	}
 
 	// t.Logf("number of edges: %d\n", tree.NumEdges())
@@ -66,51 +74,47 @@ func TestTree(t *testing.T) {
 	// 	return false
 	// })
 
-	query := "ACTGAA"
+	query := "ACTG"
 	t.Logf("query: %s\n", query)
 	code, _ := kmers.Encode([]byte(query))
-	//r, ok = tree.Get(code, uint8(len(query)))
-	r, ok = tree.Get(code)
+	r, ok = tree.Get(code, uint8(len(query)))
 	t.Logf("  %s, %v, %v\n", query, r, ok)
 
 	query = "ACTGC"
 	t.Logf("query: %s\n", query)
 	code, _ = kmers.Encode([]byte(query))
-	// _code, _k, _r, ok := tree.LongestPrefix(code, uint8(len(query)))
-	_code, _r, ok := tree.LongestPrefix(code)
+	_code, _k, _r, ok := tree.LongestPrefix(code, uint8(len(query)))
 	if ok {
-		t.Logf("  %s, %v, %v\n", kmers.Decode(_code, k), _r, ok)
+		t.Logf("  %s, %v, %v\n", kmers.Decode(_code, int(_k)), _r, ok)
 	}
 
-	query = "ACTGAA"
+	query = "ACGCA"
 	code, _ = kmers.Encode([]byte(query))
-	// srs, _ := tree.Search(code, uint8(len(query)), 4)
-	srs, _ := tree.Search(code, 4)
+	srs, _ := tree.Search(code, uint8(len(query)), 4)
 	t.Logf("query: %s\n", query)
 	for _, sr := range *srs {
 		t.Logf("  %s, len(prefix): %d, %v\n",
-			kmers.Decode(sr.Kmer, k), sr.LenPrefix, sr.Values)
+			kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
 	}
 	tree.RecycleSearchResult(srs)
 
-	query = "ACTGC"
+	query = "ACGT"
 	code, _ = kmers.Encode([]byte(query))
-	// nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
-	nodes, bases := tree.Path(code, uint8(len(query)))
+	nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
 }
 
 func TestBigTree(t *testing.T) {
 	nMasks := 1000
-	k := 21
-	nKmers := 10000 // or the number of sequences
-	var seed int64 = 1
 
 	trees := make([]*Tree, nMasks)
 
 	for i := 0; i < nMasks; i++ {
-		tree := New(uint8(k))
+		tree := New()
 
+		k := 21
+		nKmers := 10000 // or the number of sequences
+		var seed int64 = 1
 		seed = int64(i)
 
 		n := int(float64(nKmers) * 1.2)
@@ -129,8 +133,7 @@ func TestBigTree(t *testing.T) {
 		}
 
 		for i, kmer := range codes {
-			// tree.Insert(kmer, uint8(k), uint64(i))
-			tree.Insert(kmer, uint64(i))
+			tree.Insert(kmer, uint8(k), uint64(i))
 		}
 
 		trees[i] = tree
@@ -139,7 +142,7 @@ func TestBigTree(t *testing.T) {
 
 	tree := trees[0]
 
-	// tree.Walk(func(code uint64, v []uint64) bool {
+	// tree.Walk(func(code uint64, k uint8, v []uint64) bool {
 	// 	fmt.Printf("%s\n", kmers.Decode(code, int(k)))
 	// 	return false
 	// })
@@ -150,18 +153,18 @@ func TestBigTree(t *testing.T) {
 
 	query := "TCATTTAAGTCCAATCGTCAG"
 	code, _ := kmers.Encode([]byte(query))
-	srs, ok := tree.Search(code, uint8(len(query)))
+	srs, ok := tree.Search(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("query: %s\n", query)
 	if ok {
 		for _, sr := range *srs {
 			t.Logf("  %s, len(prefix): %d, %v\n",
-				kmers.Decode(sr.Kmer, k), sr.LenPrefix, sr.Values)
+				kmers.Decode(sr.Kmer, int(sr.K)), sr.LenPrefix, sr.Values)
 		}
 		tree.RecycleSearchResult(srs)
 	}
 
 	code, _ = kmers.Encode([]byte(query))
-	nodes, bases := tree.Path(code, uint8(len(query)))
+	nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
 
 }
