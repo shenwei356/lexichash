@@ -93,7 +93,7 @@ func (idx *Index) K() int {
 	return int(idx.k)
 }
 
-// Threads is the maximum concurrency number for Insert().
+// Threads is the maximum concurrency number for Insert() and ParallelizedSearch().
 var Threads = runtime.NumCPU()
 
 // Insert adds a new reference sequence to the index.
@@ -205,6 +205,7 @@ type MaskResult struct {
 //		Seq: _seq,
 //	}
 //
+//	close(input)
 //	<- done
 func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 	if idx.batchInsert {
@@ -611,6 +612,209 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 		trees[i].RecycleSearchResult(srs)
 	}
+
+	if len(*m) == 0 {
+		return nil, nil
+	}
+
+	rs := poolSearchResults.Get().(*[]*SearchResult)
+	*rs = (*rs)[:0]
+	for _, r := range *m {
+		r.Deduplicate()
+		*rs = append(*rs, r)
+	}
+
+	poolSearchResultsMap.Put(m)
+
+	// sort by score, id index
+	// sort.Slice(*rs, func(i, j int) bool {
+	// 	a := (*rs)[i]
+	// 	b := (*rs)[j]
+	// 	if a.Score() == b.Score() {
+	// 		return a.IdIdx < b.IdIdx
+	// 	}
+	// 	return a.Score() > b.Score()
+	// })rs)
+
+	sorts.Quicksort(SearchResults(*rs))
+
+	return rs, nil
+}
+
+type treeSearchResult struct {
+	treeIdx int
+	kmer    uint64
+	result  *[]*tree.SearchResult
+}
+
+var poolTreeSearchResult = &sync.Pool{New: func() interface{} {
+	return &treeSearchResult{}
+}}
+
+// ParallelizedSearch is slightly slower than Search.
+func (idx *Index) ParallelizedSearch(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
+	_kmers, _locses, err := idx.lh.Mask(s)
+	if err != nil {
+		return nil, err
+	}
+	defer idx.lh.RecycleMaskResult(_kmers, _locses)
+
+	// m := make(map[int]*SearchResult) // IdIdex -> result
+	m := poolSearchResultsMap.Get().(*map[int]*SearchResult)
+	clear(*m)
+
+	// collect search result
+	ch := make(chan *treeSearchResult, Threads)
+	done := make(chan int)
+	go func() {
+		var refpos uint64
+		var kmer uint64
+		// query substring
+		var _code uint64
+		var _pos int
+		var _begin, _end int
+		var _rc uint8
+
+		var code uint64
+		var K, _k int
+		var _k8 uint8
+		var idIdx, pos, begin, end int
+		var rc uint8
+		trees := idx.Trees
+		K = idx.K()
+		var locs []int
+		var i int
+		var srs *[]*tree.SearchResult
+		var ok bool
+
+		for data := range ch {
+			i = data.treeIdx
+			srs = data.result
+			kmer = data.kmer
+
+			locs = (*_locses)[i]
+
+			// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer, k))
+			for _, sr := range *srs { // different k-mers
+				// fmt.Printf("    %s %d\n",
+				// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
+				// 	sr.LenPrefix)
+
+				_k = int(sr.LenPrefix)
+				_k8 = sr.LenPrefix
+
+				// multiple locations for each QUERY k-mer,
+				// but most of cases, there's only one.
+				for _, _pos = range locs {
+					_rc = uint8(_pos & 1)
+					_pos >>= 2
+
+					// query
+					if _rc > 0 {
+						_begin, _end = _pos+K-_k, _pos+K
+					} else {
+						_begin, _end = _pos, _pos+_k
+					}
+
+					_code = tree.KmerPrefix(kmer, uint8(K), sr.LenPrefix)
+
+					// matched
+					code = tree.KmerPrefix(sr.Kmer, uint8(K), sr.LenPrefix)
+
+					// multiple locations for each MATCHED k-mer
+					// but most of cases, there's only one.
+					for _, refpos = range sr.Values {
+						// fmt.Printf("      %s, %d, %c\n",
+						// 	idx.ids[refpos>>38], refpos<<26>>28, strands[refpos&1])
+
+						idIdx = int(refpos >> 38)
+						pos = int(refpos << 26 >> 28)
+						rc = uint8(refpos & 1)
+
+						if rc > 0 {
+							begin, end = pos+K-_k, pos+K
+						} else {
+							begin, end = pos, pos+_k
+						}
+
+						_sub2 := poolSub.Get().(*SubstrPair)
+						_sub2.QCode = _code
+						_sub2.QK = _k8
+						_sub2.QBegin = _begin
+						_sub2.QEnd = _end
+						_sub2.QRC = _rc
+
+						_sub2.TCode = code
+						_sub2.TK = _k8
+						_sub2.TBegin = begin
+						_sub2.TEnd = end
+						_sub2.TRC = rc
+
+						var r *SearchResult
+						if r, ok = (*m)[idIdx]; !ok {
+							subs := poolSubs.Get().(*[]*SubstrPair)
+							*subs = (*subs)[:0]
+
+							r = poolSearchResult.Get().(*SearchResult)
+							r.IdIdx = idIdx
+							r.Subs = subs
+							r.cleaned = false
+							r.scoring = false
+							r.score = 0
+
+							(*m)[idIdx] = r
+						}
+
+						*r.Subs = append(*r.Subs, _sub2)
+					}
+				}
+
+			}
+
+			trees[i].RecycleSearchResult(srs)
+
+			poolTreeSearchResult.Put(data)
+		}
+		done <- 1
+	}()
+
+	var wg sync.WaitGroup
+	tokens := make(chan int, Threads)
+	nMasks := len(idx.Trees)
+	n := nMasks/Threads + 1
+	var start, end int
+
+	for j := 0; j <= Threads; j++ {
+		start, end = j*n, (j+1)*n
+		if end > nMasks {
+			end = nMasks
+		}
+
+		wg.Add(1)
+		tokens <- 1
+		go func(start, end int) {
+			for i := start; i < end; i++ {
+				kmer := (*_kmers)[i]
+				srs, ok := idx.Trees[i].Search(kmer, minPrefix) // each on the corresponding tree
+				if !ok {
+					continue
+				}
+				// ch <- treeSearchResult{kmer: kmer, treeIdx: i, result: srs}
+				r := poolTreeSearchResult.Get().(*treeSearchResult)
+				r.kmer = kmer
+				r.treeIdx = i
+				r.result = srs
+				ch <- r
+			}
+			wg.Done()
+			<-tokens
+		}(start, end)
+	}
+
+	wg.Wait()
+
+	close(ch)
+	<-done
 
 	if len(*m) == 0 {
 		return nil, nil
