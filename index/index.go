@@ -118,9 +118,9 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 				//  ref idx: 26 bits
 				//  pos:     36 bits
 				//  strand:   2 bits
-				refpos = uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1
+				refpos = uint64(idx.i)<<38 | uint64(loc)
 
-				idx.Trees[i].Insert(kmer>>2, refpos)
+				idx.Trees[i].Insert(kmer, refpos)
 			}
 		}
 
@@ -151,14 +151,15 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 		go func(start, end int) {
 			var kmer uint64
 			var loc int
+			var refpos uint64
 			for i := start; i < end; i++ {
 				kmer = (*_kmers)[i]
 				for _, loc = range (*locses)[i] {
 					//  ref idx: 26 bits
 					//  pos:     36 bits
 					//  strand:   2 bits
-					refpos := uint64(idx.i)<<38 | uint64(loc)<<2 | kmer&1
-					idx.Trees[i].Insert(kmer>>2, refpos)
+					refpos = uint64(idx.i)<<38 | uint64(loc)
+					idx.Trees[i].Insert(kmer, refpos)
 				}
 			}
 			wg.Done()
@@ -247,14 +248,15 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 					go func(start, end int) {
 						var kmer uint64
 						var loc int
+						var refpos uint64
 						for i := start; i < end; i++ {
 							kmer = (*m.Kmers)[i]
 							for _, loc = range (*m.Locses)[i] {
 								//  ref idx: 26 bits
 								//  pos:     36 bits
 								//  strand:   2 bits
-								refpos := uint64(refIdx)<<38 | uint64(loc)<<2 | kmer&1
-								trees[i].Insert(kmer>>2, refpos)
+								refpos = uint64(refIdx)<<38 | uint64(loc)
+								trees[i].Insert(kmer, refpos)
 							}
 						}
 						wg.Done()
@@ -523,17 +525,15 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	K = idx.K()
 	var locs []int
 	for i, kmer = range *_kmers { // captured k-mers by the maskes
-		// srs, ok := trees[i].Search(kmer>>2, uint8(k), minPrefix)
-		srs, ok := trees[i].Search(kmer>>2, minPrefix) // each on the corresponding tree
+		// srs, ok := trees[i].Search(kmer, uint8(k), minPrefix)
+		srs, ok := trees[i].Search(kmer, minPrefix) // each on the corresponding tree
 		if !ok {
 			continue
 		}
 
 		locs = (*_locses)[i]
 
-		_rc = uint8(kmer & 1)
-
-		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer>>2, k))
+		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer, k))
 		for _, sr := range *srs { // different k-mers
 			// fmt.Printf("    %s %d\n",
 			// 	kmers.Decode(tree.KmerPrefix(sr.Kmer, sr.K, sr.LenPrefix), int(sr.LenPrefix)),
@@ -545,6 +545,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 			// multiple locations for each QUERY k-mer,
 			// but most of cases, there's only one.
 			for _, _pos = range locs {
+				_rc = uint8(_pos & 1)
+				_pos >>= 2
+
 				// query
 				if _rc > 0 {
 					_begin, _end = _pos+K-_k, _pos+K
@@ -552,7 +555,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					_begin, _end = _pos, _pos+_k
 				}
 
-				_code = tree.KmerPrefix(kmer>>2, uint8(K), sr.LenPrefix)
+				_code = tree.KmerPrefix(kmer, uint8(K), sr.LenPrefix)
 
 				// matched
 				code = tree.KmerPrefix(sr.Kmer, uint8(K), sr.LenPrefix)

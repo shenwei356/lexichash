@@ -23,17 +23,15 @@ package lexichash
 import (
 	"errors"
 	"math"
-	"math/bits"
 	"math/rand"
-	"sort"
 	"sync"
 
 	"github.com/shenwei356/kmers"
 	iterater "github.com/shenwei356/lexichash/iterator"
 )
 
-// ErrKOverflow means K > 31.
-var ErrKOverflow = errors.New("lexichash: k-mer size (4-31) overflow")
+// ErrKOverflow means K > 32.
+var ErrKOverflow = errors.New("lexichash: k-mer size [4-32] overflow")
 
 // ErrInsufficientMasks means the number of masks is too small
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (>=4)")
@@ -69,7 +67,7 @@ func New(k int, nMasks int, canonicalKmer bool) (*LexicHash, error) {
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
 func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash, error) {
-	if k < 4 || k > 31 {
+	if k < 4 || k > 32 {
 		return nil, ErrKOverflow
 	}
 	if nMasks < 4 {
@@ -125,124 +123,6 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 	return lh, nil
 }
 
-// Compare computes the shared substrings, with identical and nested regions removed.
-// Each pair of shared substring is recorded as [4]uint64:
-//
-//	0: k-mer code of shared substring
-//	1: length of shared substring
-//	2: (start position in s1)<<2 + (negative strand flag)
-//	3: (start position in s2)<<2 + (negative strand flag)
-//
-// Note that the start position is 0-based.
-// And the 1-based location of a substring would be
-//
-//	sub[2]>>2+1, sub[2]>>2+sub[1]
-func (lh *LexicHash) Compare(s1 []byte, s2 []byte, minLen int) ([][4]uint64, error) {
-	var kmers1, kmers2 *[]uint64
-	var locses1, locses2 *[][]int
-	var err1, err2 error
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		kmers1, locses1, err1 = lh.Mask(s1)
-		wg.Done()
-	}()
-	go func() {
-		kmers2, locses2, err2 = lh.Mask(s2)
-		wg.Done()
-	}()
-	wg.Wait()
-	defer func() {
-		lh.RecycleMaskResult(kmers1, locses1)
-		lh.RecycleMaskResult(kmers2, locses2)
-	}()
-
-	if err1 != nil {
-		return nil, err1
-	}
-	if err2 != nil {
-		return nil, err2
-	}
-
-	var k2 uint64
-	k := lh.K
-	delta := k - 32
-	var n int // the number of same leading bases
-	var loc1, loc2 int
-	subs := make([][4]uint64, 0, 8)
-	for i, k1 := range *kmers1 {
-		k2 = (*kmers2)[i]
-		// compute the longest commom prefix.
-		// here they have the same K values, so the code below is fine.
-		// or you have to align them first.
-		// n = int(tree.KmerLongestPrefix(k1>>2, k2>>2, uint8(k), uint8(k)))
-		n = bits.LeadingZeros64((k1>>2)^(k2>>2))/2 + delta
-		if n < minLen {
-			continue
-		}
-
-		for _, loc1 = range (*locses1)[i] {
-			for _, loc2 = range (*locses2)[i] {
-				if k1&1 > 0 { // it's from the negative strand
-					loc1 = loc1 + k - n
-				}
-				if k2&1 > 0 { // it's from the negative strand
-					loc2 = loc2 + k - n
-				}
-
-				subs = append(subs, [4]uint64{
-					k1 >> ((k - n + 1) << 1),       // k-mer code of shared substring
-					uint64(n),                      // length of shared substring
-					uint64(uint64(loc1)<<2 | k1&1), // (start position in s1)<<2 + (negative strand flag)
-					uint64(uint64(loc2)<<2 | k2&1), // (start position in s2)<<2 + (negative strand flag)
-				})
-			}
-		}
-	}
-
-	// sort and remove duplicates or nested regions
-	sort.Slice(subs, func(i, j int) bool {
-		if subs[i][2] == subs[j][2] {
-			return subs[i][2]>>2+subs[i][1] > subs[j][2]>>2+subs[j][1]
-		}
-		return subs[i][2] < subs[j][2]
-	})
-
-	var i, j int
-	var p, v [4]uint64
-	var flag bool
-	p = subs[0]
-	for i = 1; i < len(subs); i++ {
-		v = subs[i]
-		if v == p || v[2]>>2+v[1] <= p[2]>>2+p[1] { // the same or nested
-			if !flag {
-				j = i // mark insertion position
-				flag = true
-			}
-			continue
-		}
-
-		if flag { // need to insert to previous position
-			subs[j] = v
-			j++
-		}
-		p = v
-	}
-	if j > 0 {
-		subs = subs[:j]
-	}
-
-	// for _, sub := range subs {
-	// 	fmt.Printf("(%3d,%3d, %c) vs (%3d,%3d, %c)  %3d %s\n",
-	// 		sub[2]>>2+1, sub[2]>>2+sub[1], strands[sub[2]&1],
-	// 		sub[3]>>2+1, sub[3]>>2+sub[1], strands[sub[3]&1],
-	// 		sub[1], Kmer2dna(sub[0], int(sub[1])))
-	// }
-
-	return subs, nil
-}
-
 // RecycleMaskResult recycles the results of Mask().
 // Please do not forget to call this method!
 func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
@@ -257,15 +137,15 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // Mask computes the most similar substrings for each mask in sequence s.
 // It returns
 //
-//  1. the list of the most similar k-mers for each mask, with the last 2 bits a strand
+//  1. the list of the most similar k-mers for each mask
+//  2. the start positions of all k-mers, with the last 2 bits as the strand
 //     flag (1 for negative strand)
-//  2. the start positions of all k-mers.
 func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	// this one only supports k<=31, with the last two bits as a flag
 	// for marking if the k-mer is from the negative strand.
-	iter, err := iterater.NewKmerIterator(s, lh.K, lh.canonical)
+	iter, err := iterater.NewKmerIterator(s, lh.K)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,23 +160,27 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	var mask, hash, hashRC, h uint64
 	var kmer, kmerRC uint64
 	var ok bool
-	var i, j int
+	var i, j, js int
 	var locs *[]int
 	canonical := lh.canonical
 
 	if canonical {
 		for {
-			kmer, _, ok, _ = iter.NextKmer()
+			kmer, kmerRC, ok, _ = iter.NextKmer()
 			if !ok {
 				break
 			}
 			j = iter.Index()
+			if kmerRC < kmer {
+				kmer = kmerRC
+				js = j<<2 | 1
+			}
 
 			for i, mask = range masks {
 				h = (*hashes)[i]
-				hash = kmer>>2 ^ mask
 
-				if hash <= h { // smaller hash value
+				hash = kmer ^ mask
+				if hash <= h {
 					locs = &(*locses)[i]
 					if hash < h {
 						*locs = (*locs)[:0]
@@ -304,7 +188,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 						(*hashes)[i] = hash
 						(*_kmers)[i] = kmer
 					}
-					*locs = append(*locs, j)
+					*locs = append(*locs, js)
 				}
 			}
 		}
@@ -319,15 +203,17 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 			break
 		}
 		j = iter.Index()
+		js = j << 2
 
 		for i, mask = range masks {
 			h = (*hashes)[i]
 
-			hash = kmer>>2 ^ mask
-			hashRC = kmerRC>>2 ^ mask
+			hash = kmer ^ mask
+			hashRC = kmerRC ^ mask
 			if hashRC < hash {
 				hash = hashRC
 				kmer = kmerRC
+				js |= 1 // add the strand flag to the location
 			}
 
 			if hash <= h {
@@ -338,7 +224,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 					(*hashes)[i] = hash
 					(*_kmers)[i] = kmer
 				}
-				*locs = append(*locs, j)
+				*locs = append(*locs, js)
 			}
 		}
 	}

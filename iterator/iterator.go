@@ -29,7 +29,7 @@ import (
 )
 
 // ErrInvalidK means k < 1.
-var ErrInvalidK = fmt.Errorf("k-mer iterator: invalid k-mer size (1 <= k <= 31)")
+var ErrInvalidK = fmt.Errorf("k-mer iterator: invalid k-mer size (1 <= k <= 32)")
 
 // ErrEmptySeq sequence is empty.
 var ErrEmptySeq = fmt.Errorf("k-mer iterator: empty sequence")
@@ -53,7 +53,7 @@ var poolIterator = &sync.Pool{New: func() interface{} {
 	return &Iterator{}
 }}
 
-// Iterator is a kmer code (k<=31) or hash iterator.
+// Iterator is a kmer code (k<=32) or hash iterator.
 type Iterator struct {
 	s       []byte
 	k       int
@@ -65,7 +65,6 @@ type Iterator struct {
 	idx      int
 
 	// for KmerIterator
-	canonical bool
 	length    int
 	end, e    int
 	first     bool
@@ -80,7 +79,7 @@ type Iterator struct {
 }
 
 // NewKmerIterator returns k-mer code iterator.
-func NewKmerIterator(s []byte, k int, canonical bool) (*Iterator, error) {
+func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 	if k < 1 {
 		return nil, ErrInvalidK
 	}
@@ -95,7 +94,6 @@ func NewKmerIterator(s []byte, k int, canonical bool) (*Iterator, error) {
 	iter.finished = false
 	iter.idx = 0
 
-	iter.canonical = canonical
 	iter.length = len(s)
 	iter.end = iter.length - k + 1
 	iter.kUint = uint(k)
@@ -150,14 +148,7 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	iter.preCodeRC = iter.codeRC
 	iter.idx++
 
-	code = code << 2            // positive strand
-	codeRC = iter.codeRC<<2 | 1 // negative strand
-
-	if iter.canonical && code > iter.codeRC {
-		code = codeRC
-	}
-
-	return code, codeRC, true, nil
+	return code, iter.codeRC, true, nil
 }
 
 // Index returns current 0-baesd index.

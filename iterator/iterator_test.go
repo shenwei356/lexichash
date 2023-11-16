@@ -29,8 +29,7 @@ func TestKmerIterator(t *testing.T) {
 	sequence := []byte(_s)
 	k := 10
 
-	canonical := true
-	iter, err := NewKmerIterator(sequence, k, canonical)
+	iter, err := NewKmerIterator(sequence, k)
 	if err != nil {
 		t.Errorf("fail to create aa iter rator")
 	}
@@ -53,16 +52,10 @@ func TestKmerIterator(t *testing.T) {
 		// idx, iter.s.Seq[idx:idx+k], kmers.Decode(code>>2, k), code>>2, code&1 > 0)
 
 		codes = append(codes, code)
-		if !canonical {
-			codes = append(codes, codeRC)
-		}
+		codes = append(codes, codeRC)
 	}
 
-	if canonical {
-		if len(codes) != len(_s)-k+1 {
-			t.Errorf("k-mers number error")
-		}
-	} else if len(codes) != (len(_s)-k+1)*2 {
+	if len(codes) != (len(_s)-k+1)*2 {
 		t.Errorf("k-mers number error")
 	}
 }
