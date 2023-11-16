@@ -57,16 +57,16 @@ type Index struct {
 // nMasks >= 1000 is recommended.
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
-func NewIndex(k int, nMasks int, canonicalKmer bool) (*Index, error) {
-	return NewIndexWithSeed(k, nMasks, canonicalKmer, 1)
+func NewIndex(k int, nMasks int) (*Index, error) {
+	return NewIndexWithSeed(k, nMasks, 1)
 }
 
 // NewIndexWithSeed ceates a new Index with given seed.
 // nMasks >= 1000 is recommended.
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
-func NewIndexWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*Index, error) {
-	lh, err := lexichash.NewWithSeed(k, nMasks, canonicalKmer, seed)
+func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
+	lh, err := lexichash.NewWithSeed(k, nMasks, seed)
 	if err != nil {
 		return nil, err
 	}

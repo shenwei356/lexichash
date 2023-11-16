@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package iterater
+package iterator
 
 import (
 	"errors"
@@ -39,15 +39,6 @@ var ErrShortSeq = fmt.Errorf("k-mer iterator: sequence too short")
 
 // ErrIllegalBase means that base beyond IUPAC symbols are  detected.
 var ErrIllegalBase = errors.New("k-mer iterator: illegal base")
-
-// ErrKTooLarge means that the k-mer size is too large.
-var ErrKTooLarge = fmt.Errorf("k-mer iterator: k-mer size is too large")
-
-// ErrInvalidM means that the m-mer size is too large or too small, should be in range of [4, k].
-var ErrInvalidM = fmt.Errorf("k-mer iterator: invalid m-mer size, should be in range of [4, k]")
-
-// ErrInvalidScale means
-var ErrInvalidScale = fmt.Errorf("k-mer iterator: invalid scale, should be in range of [1, k-m+1]")
 
 var poolIterator = &sync.Pool{New: func() interface{} {
 	return &Iterator{}

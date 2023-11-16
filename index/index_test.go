@@ -42,7 +42,6 @@ func TestStructSize(t *testing.T) {
 func TestHash(t *testing.T) {
 	k := 21
 	nMasks := 1000
-	cannonical := false
 	var seed int64 = 1
 
 	s1 := []byte("AGAAGGACGTGGACGTGGATGCCGATAAGAAGGAGCCGTAAGGTACCGGGCGTGGGGAGGGCAGGGGCAGGGACGGGGATCAGGGGCAGCTGATCCCCGT")
@@ -52,7 +51,7 @@ func TestHash(t *testing.T) {
 
 	// use the same sequence to build the index
 
-	idx, err := NewIndexWithSeed(k, nMasks, cannonical, seed)
+	idx, err := NewIndexWithSeed(k, nMasks, seed)
 	if err != nil {
 		t.Error(err)
 		return
@@ -81,10 +80,9 @@ func TestHash(t *testing.T) {
 func TestIndex(t *testing.T) {
 	k := 21
 	nMasks := 1000
-	cannonical := false
 	var seed int64 = 1
 
-	idx, err := NewIndexWithSeed(k, nMasks, cannonical, seed)
+	idx, err := NewIndexWithSeed(k, nMasks, seed)
 	if err != nil {
 		t.Error(err)
 		return
@@ -165,9 +163,14 @@ func TestIndex(t *testing.T) {
 		idx.RecycleSearchResult(sr)
 	}
 
+	// idx.Trees[666].Walk(func(code uint64, v []uint64) bool {
+	// 	fmt.Printf("%s\n", kmers.MustDecode(code, k))
+	// 	return false
+	// })
+
 	_queries := []string{
-		"AGAAGGACGTGGACGTGGAT",
-		"GGGACGGGGATCAGGGGCAG",
+		"ACGGCTGGGAGATGGAGCCAG",
+		"GCACATATACTACACACACAT",
 	}
 	for _, query := range _queries {
 		code, _ := kmers.Encode([]byte(query))

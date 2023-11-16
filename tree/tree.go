@@ -21,6 +21,7 @@
 package tree
 
 import (
+	"math/bits"
 	"sync"
 
 	"github.com/shenwei356/lexichash"
@@ -42,17 +43,6 @@ type node struct {
 
 	leaf *leafNode // optional
 }
-
-// func (n node) String() string {
-// 	es := make([]byte, 0, 4)
-// 	for i, e := range n.children {
-// 		if e != nil {
-// 			es = append(es, bit2base[i])
-// 		}
-// 	}
-
-// 	return fmt.Sprintf("NODE: prefix: %s, children: %4s, leaf: %s", lexichash.MustDecode(n.prefix, n.k), es, n.leaf.String())
-// }
 
 // Tree is a radix tree for storing bit-packed k-mer information
 type Tree struct {
@@ -141,7 +131,9 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 		// has a child -- exists a path
 
 		// Determine longest prefix of the search key on match
-		commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
+		// commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
+		// because k >= n.k
+		commonPrefix := MustKmerLongestPrefix(search, n.prefix, k, n.k)
 		// the new key is longer than key of n, continue to search. len(prefix) = len(n)
 		if commonPrefix == n.k {
 			search = KmerSuffix(search, k, commonPrefix) // left bases
@@ -237,7 +229,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 		// Check for key exhaution
 		if k == 0 {
 			if n.leaf != nil {
-				nodes = append(nodes, string(lexichash.MustDecode(n.leaf.key, k)))
+				// nodes = append(nodes, string(lexichash.MustDecode(n.leaf.key, t.k)))
 				return nodes, matched
 			}
 			break
@@ -262,7 +254,9 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 			// the third node would be this case.
 			//   A C AGCT
 			//   A C AGGC
-			matched += KmerLongestPrefix(search, n.prefix, k, n.k)
+			// matched += KmerLongestPrefix(search, n.prefix, k, n.k)
+			// because k >= n.k
+			matched += MustKmerLongestPrefix(search, n.prefix, k, n.k)
 			if matched >= minPrefix {
 				nodes = append(nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 				break
@@ -299,6 +293,7 @@ func (idx *Tree) RecycleSearchResult(sr *[]*SearchResult) {
 }
 
 // Search finds keys that shared prefixes at least m bases.
+// We assume the k values of the query k-mer and k-mers in the tree are the same.
 // After using the result, do not forget to call RecycleSearchResult()
 func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	if m < 1 {
@@ -346,7 +341,9 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 			// the third node would be this case.
 			//   A C AGCT
 			//   A C AGGC
-			lenPrefix += KmerLongestPrefix(search, n.prefix, k, n.k)
+			// lenPrefix += KmerLongestPrefix(search, n.prefix, k, n.k)
+			// because k >= n.k
+			lenPrefix += MustKmerLongestPrefix(search, n.prefix, k, n.k)
 			if lenPrefix >= m {
 				target = n
 				break
@@ -365,10 +362,11 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	results := poolSearchResults.Get().(*[]*SearchResult)
 	*results = (*results)[:0]
 
-	k = t.k
 	var npre uint8
 	recursiveWalk(target, func(key uint64, v []uint64) bool {
-		npre = KmerLongestPrefix(key0, key, k0, k)
+		// npre = KmerLongestPrefix(key0, key, k0, k0)
+		// since the k sizes are the same!
+		npre = uint8(bits.LeadingZeros64(key0^key)>>1) + k0 - 32
 
 		r := poolSearchResult.Get().(*SearchResult)
 		r.Kmer = key

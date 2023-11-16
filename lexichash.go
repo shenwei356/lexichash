@@ -26,15 +26,14 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/shenwei356/kmers"
-	iterater "github.com/shenwei356/lexichash/iterator"
+	"github.com/shenwei356/lexichash/iterator"
 )
 
 // ErrKOverflow means K > 32.
-var ErrKOverflow = errors.New("lexichash: k-mer size [4-32] overflow")
+var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [4-32]")
 
 // ErrInsufficientMasks means the number of masks is too small
-var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (>=4)")
+var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=4)")
 
 // LexicHash is for finding shared substrings between nucleotide sequences.
 type LexicHash struct {
@@ -44,29 +43,28 @@ type LexicHash struct {
 	Masks []uint64 // masks
 
 	// pool for storing Kmers and Locs in Mask().
-	// users need to call
+	// users need to call RecycleMaskResult after using them
 	poolKmers  *sync.Pool
 	poolLocses *sync.Pool
 
 	// a []uint64 for storing hashes in Mask(),
 	// the object is recycled in Mask()
 	poolHashes *sync.Pool
-	canonical  bool
 }
 
 // New returns a new LexicHash object.
 // nMasks >= 1000 is recommended.
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
-func New(k int, nMasks int, canonicalKmer bool) (*LexicHash, error) {
-	return NewWithSeed(k, nMasks, canonicalKmer, 1)
+func New(k int, nMasks int) (*LexicHash, error) {
+	return NewWithSeed(k, nMasks, 1)
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
 // nMasks >= 1000 is recommended.
 // Setting canonicalKmer to true is recommended,
 // cause it would produces more results.
-func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash, error) {
+func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 	if k < 4 || k > 32 {
 		return nil, ErrKOverflow
 	}
@@ -74,7 +72,7 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 		return nil, ErrInsufficientMasks
 	}
 
-	lh := &LexicHash{K: k, Seed: seed, canonical: canonicalKmer}
+	lh := &LexicHash{K: k, Seed: seed}
 
 	// ------------ generate masks ------------
 
@@ -84,17 +82,10 @@ func NewWithSeed(k int, nMasks int, canonicalKmer bool, seed int64) (*LexicHash,
 
 	r := rand.New(rand.NewSource(seed))
 	shift := 64 - k*2
-	var mask, mask_rc uint64
+	var mask uint64
 	for i := range masks {
 		mask = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
 		masks[i] = mask
-
-		if lh.canonical {
-			mask_rc = kmers.MustRevComp(mask, k) // reverse complement sequence
-			if mask_rc < mask {
-				masks[i] = mask_rc
-			}
-		}
 	}
 
 	uniqUint64s(&masks) // remove duplicates
@@ -145,7 +136,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	// this one only supports k<=31, with the last two bits as a flag
 	// for marking if the k-mer is from the negative strand.
-	iter, err := iterater.NewKmerIterator(s, lh.K)
+	iter, err := iterator.NewKmerIterator(s, lh.K)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,40 +153,6 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	var ok bool
 	var i, j, js int
 	var locs *[]int
-	canonical := lh.canonical
-
-	if canonical {
-		for {
-			kmer, kmerRC, ok, _ = iter.NextKmer()
-			if !ok {
-				break
-			}
-			j = iter.Index()
-			if kmerRC < kmer {
-				kmer = kmerRC
-				js = j<<2 | 1
-			}
-
-			for i, mask = range masks {
-				h = (*hashes)[i]
-
-				hash = kmer ^ mask
-				if hash <= h {
-					locs = &(*locses)[i]
-					if hash < h {
-						*locs = (*locs)[:0]
-
-						(*hashes)[i] = hash
-						(*_kmers)[i] = kmer
-					}
-					*locs = append(*locs, js)
-				}
-			}
-		}
-
-		lh.poolHashes.Put(hashes)
-		return _kmers, locses, nil
-	}
 
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
@@ -210,7 +167,7 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 
 			hash = kmer ^ mask
 			hashRC = kmerRC ^ mask
-			if hashRC < hash {
+			if hashRC < hash { // choose the negative strand
 				hash = hashRC
 				kmer = kmerRC
 				js |= 1 // add the strand flag to the location
