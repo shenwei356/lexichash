@@ -49,10 +49,10 @@ func KmerSuffix(code uint64, k uint8, i uint8) uint64 {
 func KmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
 	var d uint8
 	if k1 >= k2 { // most of the cases
-		code1 = code1 >> ((k1 - k2) << 1)
+		code1 >>= code1 >> ((k1 - k2) << 1)
 		d = 32 - k2
 	} else {
-		code2 = code2 >> ((k2 - k1) << 1)
+		code2 >>= code2 >> ((k2 - k1) << 1)
 		d = 32 - k1
 	}
 	return uint8(bits.LeadingZeros64(code1^code2)>>1) - d
@@ -61,7 +61,7 @@ func KmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
 // MustKmerLongestPrefix returns the length of the longest prefix.
 // We assume k1 >= k2
 func MustKmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
-	code1 = code1 >> ((k1 - k2) << 1)
+	code1 >>= ((k1 - k2) << 1)
 	return uint8(bits.LeadingZeros64(code1^code2)>>1) + k2 - 32
 }
 

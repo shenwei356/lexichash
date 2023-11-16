@@ -31,6 +31,7 @@ import (
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	"github.com/shenwei356/kmers"
+	"github.com/shenwei356/lexichash"
 )
 
 func TestStructSize(t *testing.T) {
@@ -139,6 +140,7 @@ func TestIndex(t *testing.T) {
 
 	minLen := 13
 
+	decoder := lexichash.MustDecoder()
 	for _, s := range queries {
 		sr, err := idx.Search(s.Seq.Seq, uint8(minLen))
 		if err != nil {
@@ -157,7 +159,7 @@ func TestIndex(t *testing.T) {
 				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 					v.QBegin+1, v.QEnd, Strands[v.QRC],
 					v.TBegin+1, v.TEnd, Strands[v.TRC],
-					v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
+					v.QK, decoder(v.QCode, v.QK))
 			}
 		}
 		idx.RecycleSearchResult(sr)

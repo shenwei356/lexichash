@@ -322,8 +322,8 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 
 		// Consume the search prefix
 		// if KmerHasPrefix(search, n.prefix, k, n.k) {
-		// if MustKmerHasPrefix(search, n.prefix, k, n.k) {
-		if search>>((k-n.k)<<1) == n.prefix { // manually inline code
+		// if search>>((k-n.k)<<1) == n.prefix { // manually inline code
+		if MustKmerHasPrefix(search, n.prefix, k, n.k) {
 			lenPrefix += n.k
 			// already matched at least m bases
 			// we can output all leaves below n

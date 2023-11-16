@@ -176,12 +176,14 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 			if hash <= h {
 				locs = &(*locses)[i]
 				if hash < h {
-					*locs = (*locs)[:0]
+					*locs = (*locs)[:1]
+					(*locs)[0] = js
 
 					(*hashes)[i] = hash
 					(*_kmers)[i] = kmer
+				} else {
+					*locs = append(*locs, js)
 				}
-				*locs = append(*locs, js)
 			}
 		}
 	}
