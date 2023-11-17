@@ -25,6 +25,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/shenwei356/xopen"
 )
@@ -54,6 +55,7 @@ func NewFromFile(file string) (*Tree, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer fh.Close()
 
 	return Read(fh)
 }
@@ -68,6 +70,10 @@ func (t *Tree) WriteToFile(file string) (int, error) {
 
 	return t.Write(outfh)
 }
+
+var poolBuf = &sync.Pool{New: func() interface{} {
+	return &bytes.Buffer{}
+}}
 
 // Write writes the tree to a writer.
 // Currently, it just writes all the leaves, i.e., k-mers and values.
@@ -126,7 +132,8 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 	bufVar := make([]byte, 16) // needs at most 8+8=16
 	buf := make([]byte, 36)    // needs at most 1+16+1+16=34
 	buf8 := make([]byte, 8)    // for writing uint8
-	var bufVals bytes.Buffer
+	bufVals := poolBuf.Get().(*bytes.Buffer)
+	defer poolBuf.Put(bufVals)
 	var _v uint64
 
 	t.Walk(func(key uint64, v []uint64) bool {
@@ -160,6 +167,7 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 
 		// values
 
+		bufVals.Reset()
 		for _, _v = range preVal {
 			be.PutUint64(buf8, _v)
 			bufVals.Write(buf8)
@@ -179,7 +187,6 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 
 		offset = key
 		hasPrev = false
-		bufVals.Reset()
 
 		return false
 	})
@@ -202,6 +209,7 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 		}
 		N += n
 
+		bufVals.Reset()
 		for _, _v = range preVal {
 			be.PutUint64(buf8, _v)
 			bufVals.Write(buf8)
@@ -212,8 +220,6 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 			return N, err
 		}
 		N += bufVals.Len()
-
-		bufVals.Reset()
 	}
 
 	return N, nil

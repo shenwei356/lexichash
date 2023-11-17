@@ -28,3 +28,9 @@ t_*
 t.gz
 t.*
 *.fna.gz
+*.xz
+*.zst
+*.bz2
+*.bin
+IDs.txt
+*.gz

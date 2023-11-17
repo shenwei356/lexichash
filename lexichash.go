@@ -95,6 +95,8 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 
 	lh.Masks = masks
 
+	// ------------ pools ------------
+
 	lh.poolKmers = &sync.Pool{New: func() interface{} {
 		kmers := make([]uint64, len(masks))
 		return &kmers
@@ -173,17 +175,20 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 				js |= 1 // add the strand flag to the location
 			}
 
-			if hash <= h {
-				locs = &(*locses)[i]
-				if hash < h {
-					*locs = (*locs)[:1]
-					(*locs)[0] = js
+			if hash > h {
+				continue
+			}
 
-					(*hashes)[i] = hash
-					(*_kmers)[i] = kmer
-				} else {
-					*locs = append(*locs, js)
-				}
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmer
+			} else {
+				*locs = append(*locs, js)
 			}
 		}
 	}

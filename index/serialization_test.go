@@ -22,79 +22,24 @@ package index
 
 import (
 	"io"
+	"os"
+	"runtime"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
-	"github.com/shenwei356/kmers"
 	"github.com/shenwei356/lexichash"
 )
 
-func TestStructSize(t *testing.T) {
-	t.Logf("struct: Sizeof, Alignof\n")
-	t.Logf("SubstrPair: %d, %d", unsafe.Sizeof(SubstrPair{}), unsafe.Alignof(SubstrPair{}))
-	t.Logf("SearchResult: %d, %d", unsafe.Sizeof(SearchResult{}), unsafe.Alignof(SearchResult{}))
-}
-
-func TestHash(t *testing.T) {
+func TestSerialization(t *testing.T) {
 	k := 21
-	nMasks := 1000
-	var seed int64 = 1
-
-	s1 := []byte("AGAAGGACGTGGACGTGGATGCCGATAAGAAGGAGCCGTAAGGTACCGGGCGTGGGGAGGGCAGGGGCAGGGACGGGGATCAGGGGCAGCTGATCCCCGT")
-	s2 := []byte("AGAAGGACGTGGACGTGGATcCCGATAAGAAGGAcGCCGTAAGGTACCaGGCGTGGGGAGGGCAGGGGaAGGGACGGGGATCAGGGGCAGaTGATCCCCGT")
-
-	minLen := 13
-
-	// use the same sequence to build the index
-
-	idx, err := NewIndexWithSeed(k, nMasks, seed)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	idx.Insert([]byte("s1"), s1)
-
-	sr, err := idx.Search(s2, uint8(minLen))
-	if err != nil {
-		t.Log(err)
-		return
-	}
-	t.Log()
-	t.Logf("query: %s", "s2")
-	for i, r := range *sr {
-		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
-		for _, v := range *r.Subs {
-			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-				v.QBegin+1, v.QEnd, Strands[v.QRC],
-				v.TBegin+1, v.TEnd, Strands[v.TRC],
-				v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
-		}
-	}
-	idx.RecycleSearchResult(sr)
-}
-
-func TestIndex(t *testing.T) {
-	k := 21
-	nMasks := 1000
+	nMasks := 100
 	var seed int64 = 1
 
 	idx, err := NewIndexWithSeed(k, nMasks, seed)
 	if err != nil {
-		t.Error(err)
-		return
-	}
-
-	queries, err := fastx.GetSeqs("../test_data/hairpin.query.fasta", nil, 8, 100, "")
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	if len(queries) == 0 {
 		t.Error(err)
 		return
 	}
@@ -137,11 +82,68 @@ func TestIndex(t *testing.T) {
 	t.Logf("finished to build the index in %s from %d sequences with %d masks",
 		time.Since(sTime), nSeqs, nMasks)
 
+	// ---------------------------------------------------
+
+	outDir := "testindex"
+	threads := runtime.NumCPU()
+
+	sTime = time.Now()
+
+	err = idx.WriteToPath(outDir, true, threads)
+	if err != nil {
+		t.Logf("%s", err)
+	}
+
+	t.Logf("finished to dump the index in %s", time.Since(sTime))
+
+	// ---------------------------------------------------
+
+	sTime = time.Now()
+
+	idx2, err := NewFromPath(outDir, threads)
+	if err != nil {
+		t.Logf("%s", err)
+	}
+
+	t.Logf("finished to read the index in %s", time.Since(sTime))
+
+	if idx.K() != idx2.K() {
+		t.Errorf("Ks unmatched: %d vs %d", idx.K(), idx2.K())
+		return
+	}
+
+	if len(idx.lh.Masks) != len(idx2.lh.Masks) {
+		t.Errorf("number of masks unmatched: %d vs %d", len(idx.lh.Masks), len(idx2.lh.Masks))
+		return
+	}
+
+	var m2 uint64
+	for i, m := range idx.lh.Masks {
+		if m != idx2.lh.Masks[i] {
+			t.Errorf("unmatched mask: %d vs %d", m, m2)
+			return
+		}
+	}
+
+	t.Logf("checking loaded index passed")
+
+	// ---------------------------------------------------
+
+	queries, err := fastx.GetSeqs("../test_data/hairpin.query.fasta", nil, 8, 100, "")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if len(queries) == 0 {
+		t.Error(err)
+		return
+	}
+
 	minLen := 13
 
 	decoder := lexichash.MustDecoder()
 	for _, s := range queries {
-		sr, err := idx.Search(s.Seq.Seq, uint8(minLen))
+		sr, err := idx2.Search(s.Seq.Seq, uint8(minLen))
 		if err != nil {
 			t.Log(err)
 			return
@@ -164,21 +166,10 @@ func TestIndex(t *testing.T) {
 		idx.RecycleSearchResult(sr)
 	}
 
-	// idx.Trees[666].Walk(func(code uint64, v []uint64) bool {
-	// 	fmt.Printf("%s\n", kmers.MustDecode(code, k))
-	// 	return false
-	// })
+	// ---------------------------------------------------
 
-	_queries := []string{
-		"ACGGCTGGGAGATGGAGCCAG",
-		"GCACATATACTACACACACAT",
-	}
-	for _, query := range _queries {
-		code, _ := kmers.Encode([]byte(query))
-		t.Log()
-		t.Logf("path of %s\n", query)
-		for _, path := range idx.Paths(code, uint8(len(query)), uint8(len(query))) {
-			t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(path.Nodes, "->"))
-		}
+	if os.RemoveAll(outDir) != nil {
+		t.Errorf("failed to remove the directory: %s", outDir)
+		return
 	}
 }

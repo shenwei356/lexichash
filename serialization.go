@@ -51,6 +51,7 @@ func NewFromFile(file string) (*LexicHash, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer fh.Close()
 
 	return Read(fh)
 }

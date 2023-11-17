@@ -33,7 +33,7 @@ import (
 )
 
 // ErrKConcurrentInsert occurs when calling Insert during calling BatchInsert.
-var ErrKConcurrentInsert = errors.New("lexichash: concurrent insertion")
+var ErrKConcurrentInsert = errors.New("index: concurrent insertion")
 
 // Index creates LexicHash index for mutitple reference sequences
 // and supports searching with a query sequence.
