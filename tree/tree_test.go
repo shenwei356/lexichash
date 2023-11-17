@@ -143,7 +143,6 @@ func TestBigTree(t *testing.T) {
 		}
 
 		for i, kmer := range codes {
-			// tree.Insert(kmer, uint8(k), uint64(i))
 			tree.Insert(kmer, uint64(i))
 		}
 
