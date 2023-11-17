@@ -69,9 +69,10 @@ func (t *Tree) WriteToFile(file string) (int, error) {
 	return t.Write(outfh)
 }
 
-// Write writes the tree to a file.
+// Write writes the tree to a writer.
 // Currently, it just writes all the leaves, i.e., k-mers and values.
-// Header:
+//
+// Header (24 bytes):
 //
 //	Magic number, 8 bytes, kmertree
 //	Main and minor versions, 2 bytes
@@ -83,6 +84,7 @@ func (t *Tree) WriteToFile(file string) (int, error) {
 // And the results of Walk() are already sorted.
 // So we use varints for saving two k-mers and numbers of values.
 // It would save a lot of space and it is also easy to read and write.
+//
 // Data: k-mer-values pairs.
 //
 //	Control byte for 2 k-mers, 1 byte
@@ -217,6 +219,7 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 	return N, nil
 }
 
+// Read reads a tree from an io.Reader.
 func Read(r io.Reader) (*Tree, error) {
 	buf := make([]byte, 64)
 

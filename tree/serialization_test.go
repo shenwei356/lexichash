@@ -60,12 +60,14 @@ func TestSerialization(t *testing.T) {
 
 	N, err := tree.WriteToFile(file)
 	if err != nil {
-		t.Errorf("writing tree to file: %s", err)
+		t.Errorf("writing the tree to file: %s", err)
 		return
 	}
-	t.Logf("%d k-mers are saved to file, number of bytes of uncompressed data: %d", tree.NumLeafNodes(), N)
+	t.Logf("%d k-mers are saved to file: %s, number of bytes of uncompressed data: %d",
+		tree.NumLeafNodes(), file, N)
 
 	// ----------------------------------------
+
 	tree2, err := NewFromFile(file)
 	if err != nil {
 		t.Errorf("new tree from file: %s", err)
@@ -73,7 +75,7 @@ func TestSerialization(t *testing.T) {
 	}
 
 	if tree.k != tree2.k {
-		t.Errorf("k unmatched: %d vs %d", tree.k, tree2.k)
+		t.Errorf("Ks unmatched: %d vs %d", tree.k, tree2.k)
 		return
 	}
 
