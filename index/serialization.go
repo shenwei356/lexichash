@@ -39,8 +39,8 @@ import (
 
 // var Magic = [8]byte{'l', 'e', 'x', 'i', 'c', 'i', 'd', 'x'}
 
-// var MainVersion uint8 = 0
-// var MinorVersion uint8 = 1
+var MainVersion uint8 = 0
+var MinorVersion uint8 = 1
 
 // ErrInvalidFileFormat means invalid file format.
 var ErrInvalidFileFormat = errors.New("lexichash index: invalid binary format")
@@ -63,13 +63,16 @@ var ErrInvalidIndexDir = errors.New("lexichash index: invalid index directory")
 // ErrTreeFileMissing means some tree files are missing.
 var ErrTreeFileMissing = errors.New("lexichash index: some tree files missing")
 
-// IDListFile defines the name of the ID list file
+// IDListFile defines the name of the ID list file.
 const IDListFile = "IDs.txt"
 
-// MaskFile is the name of the mask file
+// MaskFile is the name of the mask file.
 const MaskFile = "masks.bin"
 
-// TreeDir is the name of director of trees
+// InfoFile contains some summary infomation.
+const InfoFile = "info.txt"
+
+// TreeDir is the name of director of trees.
 const TreeDir = "trees"
 
 // TreeFileExt is the file extension of the tree file.
@@ -164,6 +167,12 @@ func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error 
 		}(t, file)
 	}
 	wg.Wait()
+
+	// Info file
+	err = idx.writeInfo(filepath.Join(outDir, InfoFile))
+	if err != nil {
+		return err
+	}
 
 	return err
 }
@@ -287,6 +296,22 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 	}
 
 	return idx, nil
+}
+
+func (idx *Index) writeInfo(file string) error {
+	outfh, err := xopen.Wopen(file)
+	if err != nil {
+		return err
+	}
+	defer outfh.Close()
+
+	fmt.Fprintf(outfh, "index format version: v%d.%d\n", MainVersion, MinorVersion)
+	fmt.Fprintf(outfh, "k-mer size: %d\n", idx.k)
+	fmt.Fprintf(outfh, "number of masks: %d\n", len(idx.lh.Masks))
+	fmt.Fprintf(outfh, "seed for generating masks: %d\n", idx.lh.Seed)
+	fmt.Fprintf(outfh, "number of indexed sequences: %d\n", len(idx.IDs))
+
+	return nil
 }
 
 func (idx *Index) writeIDlist(file string) error {
