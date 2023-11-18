@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -69,6 +69,11 @@ func TestKmerOperations(t *testing.T) {
 
 	// KmerLongestPrefix
 	n := KmerLongestPrefix(p1, p2, k1, k2)
+	if n != 5 {
+		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 5, n)
+	}
+
+	n = KmerLongestPrefix(p2, p1, k2, k1)
 	if n != 5 {
 		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 5, n)
 	}

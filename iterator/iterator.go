@@ -28,23 +28,23 @@ import (
 	"github.com/shenwei356/kmers"
 )
 
-// ErrInvalidK means k < 1.
+// ErrInvalidK means k < 1 or K > 32
 var ErrInvalidK = fmt.Errorf("k-mer iterator: invalid k-mer size (1 <= k <= 32)")
 
 // ErrEmptySeq sequence is empty.
 var ErrEmptySeq = fmt.Errorf("k-mer iterator: empty sequence")
 
-// ErrShortSeq means the sequence is shorter than k
+// ErrShortSeq means the sequence is shorter than k.
 var ErrShortSeq = fmt.Errorf("k-mer iterator: sequence too short")
 
-// ErrIllegalBase means that base beyond IUPAC symbols are  detected.
+// ErrIllegalBase means that bases beyond IUPAC symbols are detected.
 var ErrIllegalBase = errors.New("k-mer iterator: illegal base")
 
 var poolIterator = &sync.Pool{New: func() interface{} {
 	return &Iterator{}
 }}
 
-// Iterator is a kmer code (k<=32) or hash iterator.
+// Iterator is a nucleotide k-mer iterator.
 type Iterator struct {
 	s       []byte
 	k       int
@@ -69,7 +69,7 @@ type Iterator struct {
 	mask2 uint   // iter.kP1Uint*2
 }
 
-// NewKmerIterator returns k-mer code iterator.
+// NewKmerIterator returns a k-mer code iterator.
 func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 	if k < 1 {
 		return nil, ErrInvalidK
@@ -78,7 +78,6 @@ func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 		return nil, ErrShortSeq
 	}
 
-	// iter := &Iterator{s: s2, k: k, circular: circular}
 	iter := poolIterator.Get().(*Iterator)
 	iter.s = s
 	iter.k = k
@@ -99,14 +98,14 @@ func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 }
 
 // NextKmer returns next two k-mer codes.
-// codes[0] is for the positive strand,
-// codes[1] is for the negative strand.
+// code is for the positive strand,
+// codeRC is for the negative strand.
 func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	if iter.finished {
 		return 0, 0, false, nil
 	}
 
-	if iter.idx == iter.end {
+	if iter.idx == iter.end { // recycle the Iterator
 		iter.finished = true
 		poolIterator.Put(iter)
 		return 0, 0, false, nil
@@ -165,5 +164,3 @@ var base2bit = [256]uint64{
 	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 }
-
-var bit2base = [4]byte{'A', 'C', 'G', 'T'}

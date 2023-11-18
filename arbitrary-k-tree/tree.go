@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -238,7 +238,7 @@ func (t *Tree) Path(key uint64, k uint8, minPrefix uint8) ([]string, uint8) {
 		// Check for key exhaution
 		if k == 0 {
 			if n.leaf != nil {
-				nodes = append(nodes, string(lexichash.MustDecode(n.leaf.key, n.leaf.k)))
+				// nodes = append(nodes, string(lexichash.MustDecode(n.leaf.key, n.leaf.k)))
 				return nodes, matched
 			}
 			break

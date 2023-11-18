@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -27,13 +27,13 @@ import (
 	"github.com/shenwei356/lexichash"
 )
 
-// leafNode is used to represent a value
+// leafNode is used to represent a value.
 type leafNode struct {
 	key uint64   // ALL the bases in the node, the k-mer
 	val []uint64 // yes, multiple values
 }
 
-// node represents a node in the tree, might be the root, inner or leaf node.
+// node represents a node in the tree, it might be the root, inner or leaf node.
 type node struct {
 	prefix uint64 // prefix of the current node
 	k      uint8  // bases length of the prefix
@@ -44,37 +44,37 @@ type node struct {
 	leaf *leafNode // optional
 }
 
-// Tree is a radix tree for storing bit-packed k-mer information
+// Tree is a radix tree for storing bit-packed k-mer information.
 type Tree struct {
 	k    uint8 // use a global K
 	root *node // root node
 
-	numNodes     int
-	numLeafNodes int
+	numNodes     int // the number of nodes, including leaf nodes
+	numLeafNodes int // the number of leaf nodes
 }
 
-// Tree implements a radix tree for k-mer querying
+// Tree implements a radix tree for k-mer extractly or prefix querying.
 func New(k uint8) *Tree {
 	t := &Tree{k: k, root: &node{}}
 	return t
 }
 
-// K returns the K value
+// K returns the K value of k-mers.
 func (t *Tree) K() int {
 	return int(t.k)
 }
 
-// NumNodes returns the number of nodes
+// NumNodes returns the number of nodes, including leaf nodes.
 func (t *Tree) NumNodes() int {
 	return t.numNodes
 }
 
-// NumLeafNodes returns the number of leaf nodes
+// NumLeafNodes returns the number of leaf nodes.
 func (t *Tree) NumLeafNodes() int {
 	return t.numLeafNodes
 }
 
-// Insert is used to add a newentry or update
+// Insert is used to add a new entry or update
 // an existing entry. Returns true if an existing record is updated.
 func (t *Tree) Insert(key uint64, v uint64) bool {
 	key0 := key // will save it into the leaf node
@@ -186,7 +186,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 }
 
 // Get is used to lookup a specific key, returning
-// the value and if it was found
+// the value and if it was found.
 func (t *Tree) Get(key uint64) ([]uint64, bool) {
 	n := t.root
 	search := key
@@ -268,7 +268,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 	return nodes, matched
 }
 
-// SearchResult records information of a search result
+// SearchResult records information of a search result.
 type SearchResult struct {
 	Kmer      uint64   // searched kmer
 	LenPrefix uint8    // length of common prefix between the query and this k-mer
@@ -284,7 +284,7 @@ var poolSearchResult = &sync.Pool{New: func() interface{} {
 	return &SearchResult{}
 }}
 
-// RecycleSearchResult recycle search results objects
+// RecycleSearchResult recycles search results objects.
 func (idx *Tree) RecycleSearchResult(sr *[]*SearchResult) {
 	for _, r := range *sr {
 		poolSearchResult.Put(r)
@@ -294,7 +294,7 @@ func (idx *Tree) RecycleSearchResult(sr *[]*SearchResult) {
 
 // Search finds keys that shared prefixes at least m bases.
 // We assume the k values of the query k-mer and k-mers in the tree are the same.
-// After using the result, do not forget to call RecycleSearchResult()
+// After using the result, do not forget to call RecycleSearchResult().
 func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	if m < 1 {
 		m = 1
@@ -418,19 +418,21 @@ func (t *Tree) LongestPrefix(key uint64) (uint64, []uint64, bool) {
 	return 0, nil, false
 }
 
-// WalkFn is used when walking the tree. Takes a
+// WalkFn is used for walking the tree. Takes a
 // key and value, returning if iteration should
 // be terminated.
 // type WalkFn func(key uint64, k uint8, v []uint64) bool
 type WalkFn func(key uint64, v []uint64) bool
 
-// Walk is used to walk the tree
+// Walk is used to walk the whole tree.
 func (t *Tree) Walk(fn WalkFn) {
 	recursiveWalk(t.root, fn)
 }
 
 // recursiveWalk is used to do a pre-order walk of a node
-// recursively. Returns true if the walk should be aborted
+// recursively. Returns true if the walk should be aborted.
+// The walked k-mers are in lexicographic order,
+// so sorting is unneeded.
 func recursiveWalk(n *node, fn WalkFn) bool {
 	if n.leaf != nil && fn(n.leaf.key, n.leaf.val) {
 		return true

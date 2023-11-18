@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -32,7 +32,7 @@ import (
 // ErrKOverflow means K > 32.
 var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [4-32]")
 
-// ErrInsufficientMasks means the number of masks is too small
+// ErrInsufficientMasks means the number of masks is too small.
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=4)")
 
 // LexicHash is for finding shared substrings between nucleotide sequences.
@@ -40,30 +40,26 @@ type LexicHash struct {
 	K int // max length of shared substrings, should be in range of [4, 31]
 
 	Seed  int64    // seed for generating masks
-	Masks []uint64 // masks
+	Masks []uint64 // masks/k-mers
 
-	// pool for storing Kmers and Locs in Mask().
-	// users need to call RecycleMaskResult after using them
+	// pools for storing Kmers and Locs in Mask().
+	// users need to call RecycleMaskResult() after using them.
 	poolKmers  *sync.Pool
 	poolLocses *sync.Pool
 
 	// a []uint64 for storing hashes in Mask(),
-	// the object is recycled in Mask()
+	// the object is recycled in Mask().
 	poolHashes *sync.Pool
 }
 
 // New returns a new LexicHash object.
 // nMasks >= 1000 is recommended.
-// Setting canonicalKmer to true is recommended,
-// cause it would produces more results.
 func New(k int, nMasks int) (*LexicHash, error) {
 	return NewWithSeed(k, nMasks, 1)
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
 // nMasks >= 1000 is recommended.
-// Setting canonicalKmer to true is recommended,
-// cause it would produces more results.
 func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 	if k < 4 || k > 32 {
 		return nil, ErrKOverflow
@@ -117,7 +113,7 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 }
 
 // RecycleMaskResult recycles the results of Mask().
-// Please do not forget to call this method!
+// Please do not forget to call this method after using the mask results.
 func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 	if kmers != nil {
 		lh.poolKmers.Put(kmers)
@@ -130,9 +126,9 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // Mask computes the most similar substrings for each mask in sequence s.
 // It returns
 //
-//  1. the list of the most similar k-mers for each mask
+//  1. the list of the most similar k-mers for each mask.
 //  2. the start positions of all k-mers, with the last 2 bits as the strand
-//     flag (1 for negative strand)
+//     flag (1 for negative strand).
 func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go

@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -152,7 +152,7 @@ func TestBigTree(t *testing.T) {
 	t.Logf("number of nodes: %d\n", tree.NumNodes())
 	t.Logf("number of leaf nodes: %d\n", tree.NumLeafNodes())
 
-	query := "TCATTTAAGTCCAATCGTCAG"
+	query := "TCCCACGTCCAAGCGGTCACA"
 	code, _ := kmers.Encode([]byte(query))
 	srs, ok := tree.Search(code, uint8(len(query)), uint8(len(query)))
 	t.Logf("query: %s\n", query)

@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -37,10 +37,10 @@ import (
 	"github.com/shenwei356/xopen"
 )
 
-var Magic = [8]byte{'l', 'e', 'x', 'i', 'c', 'i', 'd', 'x'}
+// var Magic = [8]byte{'l', 'e', 'x', 'i', 'c', 'i', 'd', 'x'}
 
-var MainVersion uint8 = 0
-var MinorVersion uint8 = 1
+// var MainVersion uint8 = 0
+// var MinorVersion uint8 = 1
 
 // ErrInvalidFileFormat means invalid file format.
 var ErrInvalidFileFormat = errors.New("lexichash index: invalid binary format")

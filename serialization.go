@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -42,10 +42,10 @@ var ErrInvalidFileFormat = errors.New("lexichash: invalid binary format")
 // ErrBrokenFile means the file is not complete.
 var ErrBrokenFile = errors.New("lexichash: broken file")
 
-// ErrVersionMismatch means version mismatch between files and program
+// ErrVersionMismatch means version mismatch between files and program.
 var ErrVersionMismatch = errors.New("lexichash: version mismatch")
 
-// NewFromFile creates a LexicHash from a file
+// NewFromFile creates a LexicHash from a file.
 func NewFromFile(file string) (*LexicHash, error) {
 	fh, err := xopen.Ropen(file)
 	if err != nil {
@@ -56,7 +56,8 @@ func NewFromFile(file string) (*LexicHash, error) {
 	return Read(fh)
 }
 
-// WriteToFile writes a LexicHash to a file, optional with file extension of .gz, .xz, .zst, .bz2.
+// WriteToFile writes a LexicHash to a file,
+// optional with file extensions of .gz, .xz, .zst, .bz2.
 func (lh *LexicHash) WriteToFile(file string) (int, error) {
 	outfh, err := xopen.Wopen(file)
 	if err != nil {
@@ -71,7 +72,7 @@ func (lh *LexicHash) WriteToFile(file string) (int, error) {
 //
 // Header (32 bytes):
 //
-//	Magic number, 8 bytes, kmertree
+//	Magic number, 8 bytes, kmermask
 //	Main and minor versions, 2 bytes
 //	K, 1 byte
 //	Blank, 5 bytes

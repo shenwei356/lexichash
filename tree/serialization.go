@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -43,13 +43,13 @@ var ErrInvalidFileFormat = errors.New("k-mer tree: invalid binary format")
 // ErrBrokenFile means the file is not complete.
 var ErrBrokenFile = errors.New("k-mer tree: broken file")
 
-// ErrKOverflow means K > 32.
+// ErrKOverflow means K < 1 or K > 32.
 var ErrKOverflow = errors.New("k-mer tree: k-mer size [1, 32] overflow")
 
 // ErrVersionMismatch means version mismatch between files and program
 var ErrVersionMismatch = errors.New("k-mer tree: version mismatch")
 
-// NewFromFile creates a Tree from a file
+// NewFromFile creates a Tree from a file.
 func NewFromFile(file string) (*Tree, error) {
 	fh, err := xopen.Ropen(file)
 	if err != nil {
@@ -61,6 +61,8 @@ func NewFromFile(file string) (*Tree, error) {
 }
 
 // WriteToFile writes a tree to a file, optional with file extension of .gz, .xz, .zst, .bz2.
+// But using uncompressed format is good enough, and faster and memory efficient
+// when writing a lot of trees.
 func (t *Tree) WriteToFile(file string) (int, error) {
 	outfh, err := xopen.Wopen(file)
 	if err != nil {
@@ -435,7 +437,8 @@ func Read(r io.Reader) (*Tree, error) {
 	return t, nil
 }
 
-// Different from Insert(), this method adds the values.
+// Different from Insert(), this method adds the values,
+// rather than a single value.
 func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 	key0 := key // will save it into the leaf node
 	k := t.k

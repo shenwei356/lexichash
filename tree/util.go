@@ -9,7 +9,7 @@
 //
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
-//b
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -49,10 +49,10 @@ func KmerSuffix(code uint64, k uint8, i uint8) uint64 {
 func KmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
 	var d uint8
 	if k1 >= k2 { // most of the cases
-		code1 >>= code1 >> ((k1 - k2) << 1)
+		code1 >>= ((k1 - k2) << 1)
 		d = 32 - k2
 	} else {
-		code2 >>= code2 >> ((k2 - k1) << 1)
+		code2 >>= ((k2 - k1) << 1)
 		d = 32 - k1
 	}
 	return uint8(bits.LeadingZeros64(code1^code2)>>1) - d
