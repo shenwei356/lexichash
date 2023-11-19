@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash/iterator"
+	"github.com/twotwotwo/sorts/sortutil"
 )
 
 // ErrKOverflow means K > 32.
@@ -97,6 +98,9 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 			break
 		}
 	}
+
+	// sort
+	sortutil.Uint64s(masks)
 
 	lh.Masks = masks
 
