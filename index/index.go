@@ -43,7 +43,7 @@ type Index struct {
 
 	// each record of the k-mer value is an uint64
 	//  ref idx: 26 bits
-	//  pos:     36 bits
+	//  pos:     36 bits (0-based position)
 	//  strand:   2 bits
 	Trees []*tree.Tree
 
@@ -315,9 +315,9 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 
 // SubstrPair represents a pair of found substrings.
 type SubstrPair struct {
-	QBegin int // start position of the substring
-	QEnd   int // end position of the substring
-	TEnd   int // end position of the substring
+	QBegin int // start position of the substring (0-based)
+	QEnd   int // end position of the substring (0-based)
+	TEnd   int // end position of the substring (0-based)
 
 	QRC uint8 // a flag indicating if the substring from the negative strand (1 for yes)
 	QK  uint8 // K size
@@ -329,7 +329,7 @@ type SubstrPair struct {
 
 	// target
 	TCode  uint64 // k-mer
-	TBegin int    // start position of the substring
+	TBegin int    // start position of the substring (0-based)
 
 }
 

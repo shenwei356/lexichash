@@ -127,7 +127,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // It returns
 //
 //  1. the list of the most similar k-mers for each mask.
-//  2. the start positions of all k-mers, with the last 2 bits as the strand
+//  2. the start 0-based positions of all k-mers, with the last 2 bits as the strand
 //     flag (1 for negative strand).
 func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in
