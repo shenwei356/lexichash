@@ -72,21 +72,30 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 
 	// ------------ generate masks ------------
 
-	// generate more masks in case there are some duplicated masks
-	n := int(float64(nMasks) * 1.2)
-	masks := make([]uint64, n)
-
+	masks := make([]uint64, nMasks)
+	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
 	r := rand.New(rand.NewSource(seed))
 	shift := 64 - k*2
-	var mask uint64
-	for i := range masks {
-		mask = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
-		masks[i] = mask
-	}
+	// var _mask uint64 = 1<<(k<<1) - 1
 
-	uniqUint64s(&masks) // remove duplicates
-	if len(masks) > nMasks {
-		masks = masks[:nMasks]
+	var mask uint64
+	var v uint64
+	var i int
+	var ok bool
+	for {
+		v = r.Uint64()
+		mask = hash64(v) >> shift // hash a random int and cut into k*2 bits
+		// mask = hash64(v) & _mask // hash a random int and keep lower k*2 bits
+		if _, ok = m[mask]; ok {
+			continue
+		}
+		masks[i] = mask
+		m[mask] = struct{}{}
+		i++
+
+		if i == nMasks {
+			break
+		}
 	}
 
 	lh.Masks = masks
