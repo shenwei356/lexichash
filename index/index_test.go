@@ -177,8 +177,10 @@ func TestIndex(t *testing.T) {
 		code, _ := kmers.Encode([]byte(query))
 		t.Log()
 		t.Logf("path of %s\n", query)
-		for _, path := range idx.Paths(code, uint8(len(query)), uint8(len(query))) {
-			t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(path.Nodes, "->"))
+		paths := idx.Paths(code, uint8(len(query)), uint8(len(query)))
+		for _, path := range *paths {
+			t.Logf("  tree: %d, prefix: %d, path: %s\n", path.TreeIdx, path.Bases, strings.Join(*path.Nodes, "->"))
 		}
+		idx.RecyclePathResult(paths)
 	}
 }

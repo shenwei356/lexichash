@@ -51,11 +51,17 @@ type Tree struct {
 
 	numNodes     int // the number of nodes, including leaf nodes
 	numLeafNodes int // the number of leaf nodes
+
+	poolPath *sync.Pool // pool for path
 }
 
 // Tree implements a radix tree for k-mer extractly or prefix querying.
 func New(k uint8) *Tree {
 	t := &Tree{k: k, root: &node{}}
+	t.poolPath = &sync.Pool{New: func() interface{} {
+		tmp := make([]string, k)
+		return &tmp
+	}}
 	return t
 }
 
@@ -217,13 +223,21 @@ func (t *Tree) Get(key uint64) ([]uint64, bool) {
 	return nil, false
 }
 
+// RecyclePathResult recycles the node list.
+func (t *Tree) RecyclePathResult(nodes *[]string) {
+	t.poolPath.Put(nodes)
+}
+
 // Path returns the path of a key, i.e., the nodes list.
 // and the number of visited/matched bases.
-func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
+// Do not forgot to call RecyclePathResult() after using the results.
+func (t *Tree) Path(key uint64, minPrefix uint8) (*[]string, uint8) {
 	n := t.root
 	search := key
 	k := t.k
-	nodes := make([]string, 0, k)
+	//	nodes := make([]string, 0, k)
+	nodes := t.poolPath.Get().(*[]string)
+	*nodes = (*nodes)[:0]
 	var matched uint8
 	for {
 		// Check for key exhaution
@@ -244,7 +258,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 		// Consume the search prefix
 		if KmerHasPrefix(search, n.prefix, k, n.k) {
 			matched += n.k
-			nodes = append(nodes, string(lexichash.MustDecode(n.prefix, n.k)))
+			*nodes = append(*nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 			search = KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
@@ -258,7 +272,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) ([]string, uint8) {
 			// because k >= n.k
 			matched += MustKmerLongestPrefix(search, n.prefix, k, n.k)
 			if matched >= minPrefix {
-				nodes = append(nodes, string(lexichash.MustDecode(n.prefix, n.k)))
+				*nodes = append(*nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 				break
 			}
 

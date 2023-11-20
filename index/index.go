@@ -642,25 +642,51 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	return rs, nil
 }
 
-// ---------------------------- for Debug ----------------------------------
+// --------------------------------------------------------------
 
-// Path represents the path of query in a tree
+var poolPathResult = &sync.Pool{New: func() interface{} {
+	return &Path{}
+}}
+
+var poolPathResults = &sync.Pool{New: func() interface{} {
+	paths := make([]*Path, 0, 16)
+	return &paths
+}}
+
+// RecyclePathResult recycles the node list.
+func (idx *Index) RecyclePathResult(paths *[]*Path) {
+	for _, p := range *paths {
+		idx.Trees[p.TreeIdx].RecyclePathResult(p.Nodes)
+		poolPathResult.Put(p)
+	}
+	poolPathResults.Put(paths)
+}
+
+// Path represents the path of query in a tree.
 type Path struct {
 	TreeIdx int
-	Nodes   []string
+	Nodes   *[]string
 	Bases   uint8
 }
 
-// Paths returned the paths in all trees
-func (idx *Index) Paths(key uint64, k uint8, minPrefix uint8) []Path {
+// Paths returned the paths in all trees.
+// Do not forget to call RecyclePathResult after using the results.
+func (idx *Index) Paths(key uint64, k uint8, minPrefix uint8) *[]*Path {
 	var bases uint8
-	paths := make([]Path, 0, 8)
+	// paths := make([]Path, 0, 8)
+	paths := poolPathResults.Get().(*[]*Path)
+	*paths = (*paths)[:0]
 	for i, tree := range idx.Trees {
-		var nodes []string
+		var nodes *[]string
 		// nodes, bases = tree.Path(key, uint8(k), minPrefix)
 		nodes, bases = tree.Path(key, minPrefix)
 		if bases >= minPrefix {
-			paths = append(paths, Path{TreeIdx: i, Nodes: nodes, Bases: bases})
+			// path := Path{TreeIdx: i, Nodes: nodes, Bases: bases}
+			path := poolPathResult.Get().(*Path)
+			path.TreeIdx = i
+			path.Nodes = nodes
+			path.Bases = bases
+			*paths = append(*paths, path)
 		}
 	}
 	return paths

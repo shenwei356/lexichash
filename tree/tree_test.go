@@ -98,20 +98,22 @@ func TestTree(t *testing.T) {
 	code, _ = kmers.Encode([]byte(query))
 	// nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	nodes, bases := tree.Path(code, uint8(len(query)))
-	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(*nodes, "->"), len(*nodes), bases)
+	tree.RecyclePathResult(nodes)
 
 	query = "ACTGA"
 	code, _ = kmers.Encode([]byte(query))
 	// nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	nodes, bases = tree.Path(code, uint8(len(query)))
-	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(*nodes, "->"), len(*nodes), bases)
+	tree.RecyclePathResult(nodes)
 
 	query = "ACTGACC"
 	code, _ = kmers.Encode([]byte(query))
 	// nodes, bases := tree.Path(code, uint8(len(query)), uint8(len(query)))
 	nodes, bases = tree.Path(code, uint8(len(query)))
-	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
-
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(*nodes, "->"), len(*nodes), bases)
+	tree.RecyclePathResult(nodes)
 }
 
 func TestBigTree(t *testing.T) {
@@ -175,6 +177,6 @@ func TestBigTree(t *testing.T) {
 
 	code, _ = kmers.Encode([]byte(query))
 	nodes, bases := tree.Path(code, uint8(len(query)))
-	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(nodes, "->"), len(nodes), bases)
-
+	t.Logf("path of %s: %s, visited nodes: %d, matched bases: %d\n", query, strings.Join(*nodes, "->"), len(*nodes), bases)
+	tree.RecyclePathResult(nodes)
 }

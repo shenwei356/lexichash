@@ -434,6 +434,11 @@ func Read(r io.Reader) (*Tree, error) {
 		t.insertKeyVals(kmer1, v1)
 	}
 
+	t.poolPath = &sync.Pool{New: func() interface{} {
+		tmp := make([]string, t.k)
+		return &tmp
+	}}
+
 	return t, nil
 }
 
