@@ -387,8 +387,9 @@ func (r *SearchResult) Score() float64 {
 		r.Deduplicate()
 	}
 
+	r.score = 0
 	for _, v := range *r.Subs {
-		r.score += float64(v.QK)
+		r.score += float64(v.QK) * float64(v.QK)
 	}
 
 	r.scoring = true
@@ -403,7 +404,10 @@ func (s SearchResults) Less(i, j int) bool {
 	a := s[i]
 	b := s[j]
 	if a.Score() == b.Score() {
-		return a.IdIdx < b.IdIdx
+		if len(*a.Subs) == len(*b.Subs) {
+			return a.IdIdx < b.IdIdx
+		}
+		return len(*a.Subs) < len(*b.Subs)
 	}
 	return a.Score() > b.Score()
 }
