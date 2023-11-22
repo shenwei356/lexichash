@@ -186,7 +186,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrInvalidIndexDir
+		return nil, fmt.Errorf("index path not found: %s", outDir)
 	}
 
 	// Mask file
@@ -196,7 +196,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrInvalidIndexDir
+		return nil, fmt.Errorf("mask file not found: %s", fileMask)
 	}
 
 	// ID list file
@@ -206,7 +206,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrInvalidIndexDir
+		return nil, fmt.Errorf("ID list file not found: %s", fileIDList)
 	}
 
 	// Trees
@@ -216,7 +216,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrInvalidIndexDir
+		return nil, fmt.Errorf("trees path not found: %s", dirTrees)
 	}
 
 	// ------------- parsing -----------
