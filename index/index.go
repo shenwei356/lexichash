@@ -50,7 +50,17 @@ type Index struct {
 	IDs [][]byte // IDs of the reference genomes
 	i   uint32   // curent index, for inserting a new ref seq
 
+	RefSeqInfos []RefSeqInfo
+
 	batchInsert bool
+}
+
+// GenomeInfo is a struct to store some basic information of a ref seq
+type RefSeqInfo struct {
+	GenomeSize int   // bases of all sequences
+	Len        int   // length of contatenated sequences
+	NumSeqs    int   // number of sequences
+	SeqSizes   []int // sizes of sequences
 }
 
 // NewIndex ceates a new Index.
@@ -83,6 +93,8 @@ func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
 		Trees: trees,
 		IDs:   make([][]byte, 0, 128),
 		i:     0,
+
+		RefSeqInfos: make([]RefSeqInfo, 0, 128),
 	}
 
 	return idx, nil
@@ -99,7 +111,7 @@ var Threads = runtime.NumCPU()
 // Insert adds a new reference sequence to the index.
 // Note that this method is not concurrency-safe,
 // you can use BatchInsert, which is faster.
-func (idx *Index) Insert(id []byte, s []byte) error {
+func (idx *Index) Insert(id []byte, s []byte, seqSize int, seqSizes []int) error {
 	if idx.batchInsert {
 		return ErrKConcurrentInsert
 	}
@@ -125,6 +137,12 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 		}
 
 		idx.IDs = append(idx.IDs, id)
+		idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
+			GenomeSize: seqSize,
+			Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
+			NumSeqs:    len(seqSizes),
+			SeqSizes:   seqSizes,
+		})
 		idx.i++
 
 		return nil
@@ -169,6 +187,12 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 	wg.Wait()
 
 	idx.IDs = append(idx.IDs, id)
+	idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
+		GenomeSize: seqSize,
+		Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
+		NumSeqs:    len(seqSizes),
+		SeqSizes:   seqSizes,
+	})
 	idx.i++
 
 	return nil
@@ -178,6 +202,9 @@ func (idx *Index) Insert(id []byte, s []byte) error {
 type RefSeq struct {
 	ID  []byte
 	Seq []byte
+
+	RefSeqSize int   // genome size
+	SeqSizes   []int // lengths of each sequences
 }
 
 // MaskResult represents a mask result, it's only used in BatchInsert.
@@ -185,6 +212,9 @@ type MaskResult struct {
 	ID     []byte
 	Kmers  *[]uint64
 	Locses *[][]int
+
+	RefSeqSize int   // genome size
+	SeqSizes   []int // lengths of each sequences
 }
 
 // BatchInsert insert a reference sequence in parallel.
@@ -233,6 +263,7 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 			var n int
 			var j, start, end int
 			var refIdx uint32
+			var k int = idx.lh.K
 
 			for m := range ch {
 				nMasks = len(*(m.Kmers))
@@ -267,10 +298,17 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 				wg.Wait()
 
 				idx.IDs = append(idx.IDs, m.ID)
+				idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
+					GenomeSize: m.RefSeqSize,
+					Len:        m.RefSeqSize + (len(m.SeqSizes)-1)*(k-1),
+					NumSeqs:    len(m.SeqSizes),
+					SeqSizes:   m.SeqSizes,
+				})
 				idx.i++
 
 				idx.lh.RecycleMaskResult(m.Kmers, m.Locses)
 				poolMaskResult.Put(m)
+
 			}
 			doneInsert <- 1
 		}()
@@ -292,6 +330,8 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 				m.Kmers = _kmers
 				m.Locses = locses
 				m.ID = ref.ID
+				m.RefSeqSize = ref.RefSeqSize
+				m.SeqSizes = ref.SeqSizes
 				ch <- m
 
 				wg.Done()

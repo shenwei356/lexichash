@@ -22,8 +22,10 @@ package index
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -48,6 +50,9 @@ var ErrInvalidFileFormat = errors.New("lexichash index: invalid binary format")
 // ErrBrokenFile means the file is not complete.
 var ErrBrokenFile = errors.New("lexichash index: broken file")
 
+// ErrBrokenGenomeInfoFile means the genome info file is not complete.
+var ErrBrokenGenomeInfoFile = errors.New("lexichash index: broken genome info file")
+
 // ErrVersionMismatch means version mismatch between files and program.
 var ErrVersionMismatch = errors.New("lexichash index: version mismatch")
 
@@ -64,6 +69,8 @@ var ErrInvalidIndexDir = errors.New("lexichash index: invalid index directory")
 var ErrTreeFileMissing = errors.New("lexichash index: some tree files missing")
 
 // IDListFile defines the name of the ID list file.
+// Users can edit the file to show different names,
+// but please do not change the order of IDs.
 const IDListFile = "IDs.txt"
 
 // MaskFile is the name of the mask file.
@@ -80,6 +87,9 @@ const TreeDir = "trees"
 // but they are not recommended when saving a lot of trees,
 // as it would assume a lot of RAM.
 const TreeFileExt = ".bin"
+
+// GenomeInfoFile stores some basic information of the indexed sequences.
+const GenomeInfoFile = "genome_info.bin"
 
 // WriteToPath writes an index to a directory.
 //
@@ -127,6 +137,12 @@ func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error 
 
 	// ID list file
 	err := idx.writeIDlist(filepath.Join(outDir, IDListFile))
+	if err != nil {
+		return err
+	}
+
+	// Genome info file
+	err = idx.writeGenomeInfo(filepath.Join(outDir, GenomeInfoFile))
 	if err != nil {
 		return err
 	}
@@ -209,6 +225,16 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		return nil, fmt.Errorf("ID list file not found: %s", fileIDList)
 	}
 
+	// Genome info file
+	fileGenomeiInfo := filepath.Join(outDir, GenomeInfoFile)
+	ok, err = pathutil.Exists(fileIDList)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("genome info file not found: %s", fileIDList)
+	}
+
 	// Trees
 	dirTrees := filepath.Join(outDir, TreeDir)
 	ok, err = pathutil.DirExists(dirTrees)
@@ -232,6 +258,12 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 
 	// ID list file
 	err = idx.readIDlist(fileIDList)
+	if err != nil {
+		return nil, err
+	}
+
+	// Genome info file
+	err = idx.readGenomeInfo(fileGenomeiInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -347,4 +379,117 @@ func (idx *Index) readIDlist(file string) error {
 		idx.IDs = append(idx.IDs, []byte(scanner.Text()))
 	}
 	return scanner.Err()
+}
+
+var be = binary.BigEndian
+
+func (idx *Index) writeGenomeInfo(file string) error {
+	outfh, err := xopen.Wopen(file)
+	if err != nil {
+		return err
+	}
+	defer outfh.Close()
+
+	err = binary.Write(outfh, be, uint64(len(idx.RefSeqInfos)))
+	if err != nil {
+		return err
+	}
+	if len(idx.RefSeqInfos) == 0 {
+		return fmt.Errorf("no genome info to write")
+	}
+
+	var i int
+	var size int
+	for _, info := range idx.RefSeqInfos {
+		err = binary.Write(outfh, be, [3]uint64{uint64(info.GenomeSize), uint64(info.Len), uint64(info.NumSeqs)})
+		if err != nil {
+			return err
+		}
+
+		data := make([]byte, 8*info.NumSeqs)
+		i = 0
+		for _, size = range info.SeqSizes {
+			be.PutUint64(data[i:i+8], uint64(size))
+			i += 8
+		}
+		_, err = outfh.Write(data)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (idx *Index) readGenomeInfo(file string) error {
+	fh, err := xopen.Ropen(file)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	buf := make([]byte, 8)
+
+	// the number of records
+	n, err := io.ReadFull(fh, buf)
+	if err != nil {
+		return err
+	}
+	if n < 8 {
+		return fmt.Errorf("broken genome info file")
+	}
+	N := int(be.Uint64(buf))
+	if N == 0 {
+		return fmt.Errorf("no genome info to read")
+	}
+
+	idx.RefSeqInfos = make([]RefSeqInfo, N)
+
+	var i, j int
+	for i = 0; i < N; i++ {
+		info := RefSeqInfo{}
+		// genome size
+		n, err := io.ReadFull(fh, buf)
+		if err != nil {
+			return err
+		}
+		if n < 8 {
+			return ErrBrokenGenomeInfoFile
+		}
+		info.GenomeSize = int(be.Uint64(buf))
+
+		// len of concatenated seqs
+		n, err = io.ReadFull(fh, buf)
+		if err != nil {
+			return err
+		}
+		if n < 8 {
+			return ErrBrokenGenomeInfoFile
+		}
+		info.Len = int(be.Uint64(buf))
+
+		// number of sequences
+		n, err = io.ReadFull(fh, buf)
+		if err != nil {
+			return err
+		}
+		if n < 8 {
+			return ErrBrokenGenomeInfoFile
+		}
+		info.NumSeqs = int(be.Uint64(buf))
+
+		info.SeqSizes = make([]int, info.NumSeqs)
+		for j = 0; j < info.NumSeqs; j++ {
+			n, err = io.ReadFull(fh, buf)
+			if err != nil {
+				return err
+			}
+			if n < 8 {
+				return ErrBrokenGenomeInfoFile
+			}
+			info.SeqSizes[j] = int(be.Uint64(buf))
+		}
+		idx.RefSeqInfos[i] = info
+	}
+	return nil
 }

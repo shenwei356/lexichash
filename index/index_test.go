@@ -57,7 +57,12 @@ func TestHash(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	idx.Insert([]byte("s1"), s1)
+	idx.Insert([]byte("s1"), s1, len(s1), []int{len(s1)})
+
+	for i, info := range idx.RefSeqInfos {
+		t.Logf("%s; sum: %d, concatenated sum: %d, #seqs: %d, #sizes: %v",
+			idx.IDs[i], info.GenomeSize, info.Len, info.NumSeqs, info.SeqSizes)
+	}
 
 	sr, err := idx.Search(s2, uint8(minLen))
 	if err != nil {
