@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package tree
+package util
 
 var offsets = []uint8{56, 48, 40, 32, 24, 16, 8, 0}
 
@@ -44,7 +44,7 @@ func PutUint64s(buf []byte, v1, v2 uint64) (ctrl byte, n int) {
 
 // Uint64s decode from encoded bytes
 func Uint64s(ctrl byte, buf []byte) (values [2]uint64, n int) {
-	blens := ctrlByte2ByteLengths[ctrl]
+	blens := CtrlByte2ByteLengths[ctrl]
 	if len(buf) < int(blens[0]+blens[1]) {
 		return values, 0
 	}
@@ -84,7 +84,7 @@ func byteLength(n uint64) uint8 {
 	return 8
 }
 
-var ctrlByte2ByteLengths = [64][2]uint8{
+var CtrlByte2ByteLengths = [64][2]uint8{
 	{1, 1}, // 0, 0b000000
 	{1, 2},
 	{1, 3},

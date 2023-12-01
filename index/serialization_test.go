@@ -168,6 +168,47 @@ func TestSerialization(t *testing.T) {
 
 	// ---------------------------------------------------
 
+	idx.ExtractKmerLocations()
+
+	err = idx.WriteKmerLocations()
+	if err != nil {
+		t.Log(err)
+		return
+	}
+
+	old := idx.KmerLocations
+
+	err = idx.ReadKmerLocations()
+	if err != nil {
+		t.Log(err)
+		return
+	}
+
+	if len(old) != len(idx.KmerLocations) {
+		t.Log("number of mask location records error")
+		return
+	}
+
+	var vs2 []uint64
+	var v, v2 uint64
+	var j int
+	for i, vs := range old {
+		vs2 = idx.KmerLocations[i]
+		if len(vs) != len(vs2) {
+			t.Logf("number of mask locations error for ref id: %d", i)
+			return
+		}
+		for j, v = range vs {
+			v2 = vs2[j]
+			if v != v2 {
+				t.Logf("mask location records error for id: %d", i)
+				return
+			}
+		}
+	}
+
+	// ---------------------------------------------------
+
 	if os.RemoveAll(outDir) != nil {
 		t.Errorf("failed to remove the directory: %s", outDir)
 		return

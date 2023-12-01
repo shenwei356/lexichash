@@ -190,6 +190,8 @@ func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error 
 		return err
 	}
 
+	idx.path = outDir
+
 	return err
 }
 
@@ -247,7 +249,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 
 	// ------------- parsing -----------
 
-	idx := &Index{}
+	idx := &Index{path: outDir}
 
 	// Mask file
 	idx.lh, err = lexichash.NewFromFile(fileMask)
@@ -346,6 +348,8 @@ func (idx *Index) writeInfo(file string) error {
 	return nil
 }
 
+// --------------------------------------------------------------
+
 func (idx *Index) writeIDlist(file string) error {
 	outfh, err := xopen.Wopen(file)
 	if err != nil {
@@ -368,18 +372,28 @@ func (idx *Index) readIDlist(file string) error {
 	}
 	defer fh.Close()
 
-	if idx.IDs == nil {
-		idx.IDs = make([][]byte, 0, 1024)
-	} else {
-		idx.IDs = idx.IDs[:0]
+	idx.IDs, err = ReadIDlistFromFile(file)
+	return err
+}
+
+// ReadIDlistFromFile read ID list from a file
+func ReadIDlistFromFile(file string) ([][]byte, error) {
+	fh, err := xopen.Ropen(file)
+	if err != nil {
+		return nil, err
 	}
+	defer fh.Close()
+
+	ids := make([][]byte, 0, 1024)
 
 	scanner := bufio.NewScanner(fh)
 	for scanner.Scan() {
-		idx.IDs = append(idx.IDs, []byte(scanner.Text()))
+		ids = append(ids, []byte(scanner.Text()))
 	}
-	return scanner.Err()
+	return ids, scanner.Err()
 }
+
+// --------------------------------------------------------------
 
 var be = binary.BigEndian
 
@@ -493,3 +507,5 @@ func (idx *Index) readGenomeInfo(file string) error {
 	}
 	return nil
 }
+
+// --------------------------------------------------------------

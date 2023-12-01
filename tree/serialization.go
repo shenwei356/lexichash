@@ -27,6 +27,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/shenwei356/lexichash/util"
 	"github.com/shenwei356/xopen"
 )
 
@@ -150,13 +151,13 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 		// 2 k-mers and numbers of values
 
 		// only save key2 - key1, which is small so it could be saved in few bytes
-		ctrlByteKey, nBytesKey = PutUint64s(bufVar, preKey-offset, key-preKey)
+		ctrlByteKey, nBytesKey = util.PutUint64s(bufVar, preKey-offset, key-preKey)
 		buf[0] = ctrlByteKey
 		copy(buf[1:nBytesKey+1], bufVar[:nBytesKey])
 		n = nBytesKey + 1
 
 		// save lengths of values
-		ctrlByteVal, nBytesVal = PutUint64s(bufVar, uint64(len(preVal)), uint64(len(v)))
+		ctrlByteVal, nBytesVal = util.PutUint64s(bufVar, uint64(len(preVal)), uint64(len(v)))
 		buf[n] = ctrlByteVal
 		copy(buf[n+1:n+nBytesVal+1], bufVar[:nBytesVal])
 		n += nBytesVal + 1
@@ -199,7 +200,7 @@ func (t *Tree) Write(w io.Writer) (int, error) {
 
 	if hasPrev { // the last single one
 		// save key2 - key1 and length of the values
-		ctrlByteKey, nBytesKey = PutUint64s(bufVar, preKey-offset, uint64(len(preVal)))
+		ctrlByteKey, nBytesKey = util.PutUint64s(bufVar, preKey-offset, uint64(len(preVal)))
 		buf[0] = ctrlByteKey // set the first bit to one, as a flag of last record
 
 		copy(buf[1:nBytesKey+1], bufVar[:nBytesKey])
@@ -303,7 +304,7 @@ func Read(r io.Reader) (*Tree, error) {
 		ctrlByte = buf[0]
 
 		// parse the control byte
-		bytes = ctrlByte2ByteLengths[ctrlByte]
+		bytes = util.CtrlByte2ByteLengths[ctrlByte]
 		nBytes = int(bytes[0] + bytes[1])
 
 		// read encoded bytes
@@ -315,7 +316,7 @@ func Read(r io.Reader) (*Tree, error) {
 			return nil, ErrBrokenFile
 		}
 
-		decodedVals, nDecoded = Uint64s(ctrlByte, buf[:nBytes])
+		decodedVals, nDecoded = util.Uint64s(ctrlByte, buf[:nBytes])
 		if nDecoded == 0 {
 			return nil, ErrBrokenFile
 		}
@@ -335,7 +336,7 @@ func Read(r io.Reader) (*Tree, error) {
 		ctrlByte = buf[0]
 
 		// parse the control byte
-		bytes = ctrlByte2ByteLengths[ctrlByte]
+		bytes = util.CtrlByte2ByteLengths[ctrlByte]
 		nBytes = int(bytes[0] + bytes[1])
 
 		// read encoded bytes
@@ -347,7 +348,7 @@ func Read(r io.Reader) (*Tree, error) {
 			return nil, ErrBrokenFile
 		}
 
-		decodedVals, nDecoded = Uint64s(ctrlByte, buf[:nBytes])
+		decodedVals, nDecoded = util.Uint64s(ctrlByte, buf[:nBytes])
 		if nDecoded == 0 {
 			return nil, ErrBrokenFile
 		}
@@ -398,7 +399,7 @@ func Read(r io.Reader) (*Tree, error) {
 		ctrlByte = buf[0]
 
 		// parse the control byte
-		bytes = ctrlByte2ByteLengths[ctrlByte]
+		bytes = util.CtrlByte2ByteLengths[ctrlByte]
 		nBytes = int(bytes[0] + bytes[1])
 
 		// read encoded bytes
@@ -410,7 +411,7 @@ func Read(r io.Reader) (*Tree, error) {
 			return nil, ErrBrokenFile
 		}
 
-		decodedVals, nDecoded = Uint64s(ctrlByte, buf[:nBytes])
+		decodedVals, nDecoded = util.Uint64s(ctrlByte, buf[:nBytes])
 		if nDecoded == 0 {
 			return nil, ErrBrokenFile
 		}

@@ -22,8 +22,6 @@ package tree
 
 import (
 	"math/bits"
-
-	"github.com/twotwotwo/sorts/sortutil"
 )
 
 var bit2base = [4]byte{'A', 'C', 'G', 'T'}
@@ -77,49 +75,4 @@ func KmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 // MustKmerHasPrefix check if a k-mer has a prefix, by assuming k1>=k2.
 func MustKmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
-}
-
-// https://gist.github.com/badboy/6267743 .
-// version with mask: https://gist.github.com/lh3/974ced188be2f90422cc .
-func hash64(key uint64) uint64 {
-	key = (^key) + (key << 21) // key = (key << 21) - key - 1
-	key = key ^ (key >> 24)
-	key = (key + (key << 3)) + (key << 8) // key * 265
-	key = key ^ (key >> 14)
-	key = (key + (key << 2)) + (key << 4) // key * 21
-	key = key ^ (key >> 28)
-	key = key + (key << 31)
-	return key
-}
-
-func uniqUint64s(list *[]uint64) {
-	if len(*list) == 0 || len(*list) == 1 {
-		return
-	}
-
-	sortutil.Uint64s(*list)
-
-	var i, j int
-	var p, v uint64
-	var flag bool
-	p = (*list)[0]
-	for i = 1; i < len(*list); i++ {
-		v = (*list)[i]
-		if v == p {
-			if !flag {
-				j = i // mark insertion position
-				flag = true
-			}
-			continue
-		}
-
-		if flag { // need to insert to previous position
-			(*list)[j] = v
-			j++
-		}
-		p = v
-	}
-	if j > 0 {
-		*list = (*list)[:j]
-	}
 }

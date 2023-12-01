@@ -18,51 +18,51 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package lexichash
+package util
 
-import (
-	"github.com/shenwei356/kmers"
-)
+import "github.com/twotwotwo/sorts/sortutil"
 
-func Kmer2dna(code uint64, k int) []byte {
-	return kmers.Decode(code, k)
+// https://gist.github.com/badboy/6267743 .
+// version with mask: https://gist.github.com/lh3/974ced188be2f90422cc .
+func Hash64(key uint64) uint64 {
+	key = (^key) + (key << 21) // key = (key << 21) - key - 1
+	key = key ^ (key >> 24)
+	key = (key + (key << 3)) + (key << 8) // key * 265
+	key = key ^ (key >> 14)
+	key = (key + (key << 2)) + (key << 4) // key * 21
+	key = key ^ (key >> 28)
+	key = key + (key << 31)
+	return key
 }
 
-var bit2base = [4]byte{'A', 'C', 'G', 'T'}
+func UniqUint64s(list *[]uint64) {
+	if len(*list) == 0 || len(*list) == 1 {
+		return
+	}
 
-// MustDecoder returns a Decode function, which reuses the byte slice
-func MustDecoder() func(code uint64, k uint8) []byte {
-	buf := make([]byte, 32)
+	sortutil.Uint64s(*list)
 
-	return func(code uint64, k uint8) []byte {
-		kmer := buf[:k]
-		var i uint8
-		for i = 0; i < k; i++ {
-			kmer[k-1-i] = bit2base[code&3]
-
-			// it's slower than bit2base[code&3], according to the test.
-			// kmer[k-1-i] = byte(uint64(1413956417>>((code&3)<<3)) & 255)
-
-			code >>= 2
+	var i, j int
+	var p, v uint64
+	var flag bool
+	p = (*list)[0]
+	for i = 1; i < len(*list); i++ {
+		v = (*list)[i]
+		if v == p {
+			if !flag {
+				j = i // mark insertion position
+				flag = true
+			}
+			continue
 		}
-		return kmer
+
+		if flag { // need to insert to previous position
+			(*list)[j] = v
+			j++
+		}
+		p = v
+	}
+	if j > 0 {
+		*list = (*list)[:j]
 	}
 }
-
-// MustDecode return k-mer string
-func MustDecode(code uint64, k uint8) []byte {
-	kmer := make([]byte, k)
-	var i uint8
-	for i = 0; i < k; i++ {
-		kmer[k-1-i] = bit2base[code&3]
-
-		// it's slower than bit2base[code&3], according to the test.
-		// kmer[k-1-i] = byte(uint64(1413956417>>((code&3)<<3)) & 255)
-
-		code >>= 2
-	}
-	return kmer
-}
-
-// Strands could be used to output strand for a reverse complement flag
-var Strands = [2]byte{'+', '-'}

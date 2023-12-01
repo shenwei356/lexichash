@@ -27,6 +27,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash/iterator"
+	"github.com/shenwei356/lexichash/util"
 	"github.com/twotwotwo/sorts/sortutil"
 )
 
@@ -85,7 +86,7 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 	var ok bool
 	for {
 		v = r.Uint64()
-		mask = hash64(v) >> shift // hash a random int and cut into k*2 bits
+		mask = util.Hash64(v) >> shift // hash a random int and cut into k*2 bits
 		// mask = hash64(v) & _mask // hash a random int and keep lower k*2 bits
 		if _, ok = m[mask]; ok {
 			continue

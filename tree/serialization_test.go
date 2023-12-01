@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/shenwei356/lexichash"
+	"github.com/shenwei356/lexichash/util"
 )
 
 func TestSerialization(t *testing.T) {
@@ -42,10 +43,10 @@ func TestSerialization(t *testing.T) {
 	shift := 64 - k*2
 	var kmer uint64
 	for i := range codes {
-		kmer = hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
+		kmer = util.Hash64(r.Uint64()) >> shift // hash a random int and cut into k*2 bits
 		codes[i] = kmer
 	}
-	uniqUint64s(&codes) // remove duplicates
+	util.UniqUint64s(&codes) // remove duplicates
 	if len(codes) > nKmers {
 		codes = codes[:nKmers]
 	}
