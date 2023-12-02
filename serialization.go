@@ -204,8 +204,15 @@ func Read(r io.Reader) (*LexicHash, error) {
 	}
 	lh.Masks = masks
 
+	// index masks
+	lh.indexMasks()
+
 	// do not forgot the buffer
 
+	lh.poolList = &sync.Pool{New: func() interface{} {
+		tmp := make([]int, 128)
+		return &tmp
+	}}
 	lh.poolKmers = &sync.Pool{New: func() interface{} {
 		kmers := make([]uint64, len(masks))
 		return &kmers

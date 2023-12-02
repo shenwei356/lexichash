@@ -32,7 +32,7 @@ import (
 )
 
 // ErrKOverflow means K > 32.
-var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [4-32]")
+var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [5-32]")
 
 // ErrInsufficientMasks means the number of masks is too small.
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=4)")
@@ -43,6 +43,15 @@ type LexicHash struct {
 
 	Seed  int64    // seed for generating masks
 	Masks []uint64 // masks/k-mers
+
+	// indexes for fast locating masks to compare
+	m1 []*[]int
+	m2 []*[]int
+	m3 []*[]int
+	m4 []*[]int
+	m5 []*[]int
+	// pool for checking masks without matches
+	poolList *sync.Pool
 
 	// pools for storing Kmers and Locs in Mask().
 	// users need to call RecycleMaskResult() after using them.
@@ -62,21 +71,52 @@ func New(k int, nMasks int) (*LexicHash, error) {
 
 // NewWithSeed creates a new LexicHash object with given seed.
 // nMasks >= 1000 is recommended.
-func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
-	if k < 4 || k > 32 {
+func NewWithSeed(k int, nMasks int, randSeed int64) (*LexicHash, error) {
+	if k < 5 || k > 32 {
 		return nil, ErrKOverflow
 	}
 	if nMasks < 4 {
 		return nil, ErrInsufficientMasks
 	}
 
-	lh := &LexicHash{K: k, Seed: seed}
+	lh := &LexicHash{K: k, Seed: randSeed}
 
 	// ------------ generate masks ------------
 
+	masks := genRandomMasks(k, nMasks, randSeed)
+
+	lh.Masks = masks
+	lh.indexMasks()
+
+	// ------------ pools ------------
+
+	lh.poolList = &sync.Pool{New: func() interface{} {
+		tmp := make([]int, 128)
+		return &tmp
+	}}
+	lh.poolKmers = &sync.Pool{New: func() interface{} {
+		kmers := make([]uint64, len(masks))
+		return &kmers
+	}}
+	lh.poolLocses = &sync.Pool{New: func() interface{} {
+		locses := make([][]int, len(masks))
+		for i := range locses {
+			locses[i] = make([]int, 1)
+		}
+		return &locses
+	}}
+	lh.poolHashes = &sync.Pool{New: func() interface{} {
+		hashes := make([]uint64, len(masks))
+		return &hashes
+	}}
+
+	return lh, nil
+}
+
+func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
 	masks := make([]uint64, nMasks)
 	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewSource(randSeed))
 	shift := 64 - k*2
 	// var _mask uint64 = 1<<(k<<1) - 1
 
@@ -103,27 +143,73 @@ func NewWithSeed(k int, nMasks int, seed int64) (*LexicHash, error) {
 	// sort
 	sortutil.Uint64s(masks)
 
-	lh.Masks = masks
+	return masks
+}
 
-	// ------------ pools ------------
-
-	lh.poolKmers = &sync.Pool{New: func() interface{} {
-		kmers := make([]uint64, len(masks))
-		return &kmers
-	}}
-	lh.poolLocses = &sync.Pool{New: func() interface{} {
-		locses := make([][]int, len(masks))
-		for i := range locses {
-			locses[i] = make([]int, 1)
+// indexMasks indexes masks with lists for fast locating masks to compare
+func (lh *LexicHash) indexMasks() {
+	k := lh.K
+	var prefix uint64
+	var list *[]int
+	// 5
+	m := make([]*[]int, 1<<(5<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 5) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
 		}
-		return &locses
-	}}
-	lh.poolHashes = &sync.Pool{New: func() interface{} {
-		hashes := make([]uint64, len(masks))
-		return &hashes
-	}}
+	}
+	lh.m5 = m
 
-	return lh, nil
+	// 4
+	m = make([]*[]int, 1<<(4<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 4) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.m4 = m
+
+	// 3
+	m = make([]*[]int, 1<<(3<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 3) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.m3 = m
+
+	// 2
+	m = make([]*[]int, 1<<(2<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 2) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.m2 = m
+
+	// 1
+	m = make([]*[]int, 1<<(1<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 1) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.m1 = m
 }
 
 // RecycleMaskResult recycles the results of Mask().
@@ -153,18 +239,26 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 		return nil, nil, err
 	}
 
-	var masks = lh.Masks
+	masks := lh.Masks
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
 	for i := range *hashes {
 		(*hashes)[i] = math.MaxUint64
 	}
-	var mask, hash, hashRC, h uint64
+	var mask, hash, h uint64
 	var kmer, kmerRC uint64
 	var ok bool
 	var i, j, js int
 	var locs *[]int
+
+	k := lh.K
+	m5 := lh.m5
+	m4 := lh.m4
+	m3 := lh.m3
+	m2 := lh.m2
+	m1 := lh.m1
+	var maskIdxs *[]int
 
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
@@ -174,16 +268,27 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 		j = iter.Index()
 		js = j << 2
 
-		for i, mask = range masks {
+		// ---------- positive strand ----------
+
+		maskIdxs = m5[int(kmer>>((k-5)<<1))]
+		if maskIdxs == nil {
+			maskIdxs = m4[int(kmer>>((k-4)<<1))]
+			if maskIdxs == nil {
+				maskIdxs = m3[int(kmer>>((k-3)<<1))]
+				if maskIdxs == nil {
+					maskIdxs = m2[int(kmer>>((k-2)<<1))]
+					if maskIdxs == nil {
+						maskIdxs = m1[int(kmer>>((k-1)<<1))]
+					}
+				}
+			}
+		}
+
+		for _, i = range *maskIdxs {
+			mask = masks[i]
 			h = (*hashes)[i]
 
 			hash = kmer ^ mask
-			hashRC = kmerRC ^ mask
-			if hashRC < hash { // choose the negative strand
-				hash = hashRC
-				kmer = kmerRC
-				js |= 1 // add the strand flag to the location
-			}
 
 			if hash > h {
 				continue
@@ -201,8 +306,128 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 				*locs = append(*locs, js)
 			}
 		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		maskIdxs = m5[int(kmerRC>>((k-5)<<1))]
+		if maskIdxs == nil {
+			maskIdxs = m4[int(kmerRC>>((k-4)<<1))]
+			if maskIdxs == nil {
+				maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
+				if maskIdxs == nil {
+					maskIdxs = m2[int(kmerRC>>((k-2)<<1))]
+					if maskIdxs == nil {
+						maskIdxs = m1[int(kmerRC>>((k-1)<<1))]
+					}
+				}
+			}
+		}
+
+		for _, i = range *maskIdxs {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
 	}
 
-	lh.poolHashes.Put(hashes)
+	// -------------------------------------------------
+	// some mask may do not have any matches,
+	// use the classic method for them
+
+	noMatches := lh.poolList.Get().(*[]int)
+	*noMatches = (*noMatches)[:0]
+	for i, h := range *hashes {
+		if h == math.MaxUint64 {
+			*noMatches = append(*noMatches, i)
+		}
+	}
+
+	if len(*noMatches) == 0 { // cool, no need to continue
+		lh.poolList.Put(noMatches)
+		return _kmers, locses, nil
+	}
+
+	iter, _ = iterator.NewKmerIterator(s, lh.K)
+	for {
+		kmer, kmerRC, ok, _ = iter.NextKmer()
+		if !ok {
+			break
+		}
+		j = iter.Index()
+		js = j << 2
+
+		// ---------- positive strand ----------
+
+		for _, i = range *noMatches {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmer ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmer
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		for _, i = range *noMatches {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+	}
+
+	lh.poolList.Put(noMatches)
 	return _kmers, locses, nil
 }
