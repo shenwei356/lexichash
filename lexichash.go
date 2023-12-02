@@ -64,13 +64,15 @@ type LexicHash struct {
 }
 
 // New returns a new LexicHash object.
-// nMasks >= 1000 is recommended.
+// nMasks better be >= 1024 and better be power of 4,
+// i.e., 4, 16, 64, 256, 1024, 4096 ...
 func New(k int, nMasks int) (*LexicHash, error) {
 	return NewWithSeed(k, nMasks, 1)
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
-// nMasks >= 1000 is recommended.
+// nMasks better be >= 1024 and better be power of 4,
+// i.e., 4, 16, 64, 256, 1024, 4096 ...
 func NewWithSeed(k int, nMasks int, randSeed int64) (*LexicHash, error) {
 	if k < 5 || k > 32 {
 		return nil, ErrKOverflow
@@ -117,17 +119,40 @@ func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
 	masks := make([]uint64, nMasks)
 	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
 	r := rand.New(rand.NewSource(randSeed))
-	shift := 64 - k*2
 	// var _mask uint64 = 1<<(k<<1) - 1
 
+	// generate 4^x prefix
+	nPrefix := 1
+	for 1<<(nPrefix<<1) <= nMasks {
+		nPrefix++
+	}
+	nPrefix--
+	n := 1 << (nPrefix << 1)
+	bases := make([]uint64, n)
+	for i := 0; i < n; i++ {
+		bases[i] = uint64(i)
+	}
+
+	// distribute these prefixes
+	var j = 0
+	for j = 0; j < nMasks/n; j++ {
+		copy(masks[j*n:(j+1)*n], bases)
+	}
+	if nMasks%n != 0 { // randomly sampling for left
+		rand.Shuffle(n, func(i, j int) { bases[i], bases[j] = bases[j], bases[i] })
+		copy(masks[j*n:], bases[:nMasks%n])
+	}
+
+	// concatenate with random numbers
+	var _mask uint64 = 1<<(uint64(k-nPrefix)<<1) - 1
+	shiftP := uint64(k-nPrefix) << 1
 	var mask uint64
 	var v uint64
 	var i int
 	var ok bool
 	for {
 		v = r.Uint64()
-		mask = util.Hash64(v) >> shift // hash a random int and cut into k*2 bits
-		// mask = hash64(v) & _mask // hash a random int and keep lower k*2 bits
+		mask = util.Hash64(v)&_mask | masks[i]<<shiftP
 		if _, ok = m[mask]; ok {
 			continue
 		}

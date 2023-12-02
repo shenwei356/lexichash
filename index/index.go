@@ -66,17 +66,15 @@ type RefSeqInfo struct {
 }
 
 // NewIndex ceates a new Index.
-// nMasks >= 1000 is recommended.
-// Setting canonicalKmer to true is recommended,
-// cause it would produces more results.
+// nMasks better be >= 1024 and better be power of 4,
+// i.e., 4, 16, 64, 256, 1024, 4096 ...
 func NewIndex(k int, nMasks int) (*Index, error) {
 	return NewIndexWithSeed(k, nMasks, 1)
 }
 
 // NewIndexWithSeed ceates a new Index with given seed.
-// nMasks >= 1000 is recommended.
-// Setting canonicalKmer to true is recommended,
-// cause it would produces more results.
+// nMasks better be >= 1024 and better be power of 4,
+// i.e., 4, 16, 64, 256, 1024, 4096 ...
 func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
 	lh, err := lexichash.NewWithSeed(k, nMasks, seed)
 	if err != nil {
