@@ -131,7 +131,7 @@ func TestIndex(t *testing.T) {
 
 		_seq := make([]byte, len(record.Seq.Seq))
 		copy(_seq, record.Seq.Seq)
-		input <- RefSeq{
+		input <- &RefSeq{
 			ID:  []byte(string(record.ID)),
 			Seq: _seq,
 		}

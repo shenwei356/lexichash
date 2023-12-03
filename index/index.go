@@ -207,6 +207,24 @@ type RefSeq struct {
 	SeqSizes   []int // lengths of each sequences
 }
 
+// PoolRefSeq is the object pool of RefSeq.
+var PoolRefSeq = &sync.Pool{New: func() interface{} {
+	return &RefSeq{
+		ID:         make([]byte, 0, 128),
+		Seq:        make([]byte, 0, 10<<20),
+		RefSeqSize: 0,
+		SeqSizes:   make([]int, 0, 128),
+	}
+}}
+
+// Reset resets RefSeq.
+func (r *RefSeq) Reset() {
+	r.ID = r.ID[:0]
+	r.Seq = r.Seq[:0]
+	r.RefSeqSize = 0
+	r.SeqSizes = r.SeqSizes[:0]
+}
+
 // MaskResult represents a mask result, it's only used in BatchInsert.
 type MaskResult struct {
 	ID     []byte
@@ -227,23 +245,27 @@ type MaskResult struct {
 // Example:
 //
 //	input, done := BatchInsert()
-//	// record is a fastx.Record//
-//	_seq := make([]byte, len(record.Seq.Seq))
-//	copy(_seq, record.Seq.Seq)
-//	input <- RefSeq{
-//		ID:  []byte(string(record.ID)),
-//		Seq: _seq,
-//	}
 //
-//	close(input)
-//	<- done
-func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
+// refseq := index.PoolRefSeq.Get().(*index.RefSeq)
+// refseq.Reset()
+//
+// // record is a fastx.Record//
+// refseq.ID = append(refseq.ID, record.ID...)
+// refseq.Seq = append(refseq.Seq, record.Seq.Seq...)
+// refseq.SeqSizes = append(refseq.SeqSizes, len(record.Seq.Seq))
+// refseq.RefSeqSize = len(record.Seq.Seq)
+//
+// input <- refseq
+//
+// close(input)
+// <- done
+func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 	if idx.batchInsert {
 		panic(ErrKConcurrentInsert)
 	}
 	idx.batchInsert = true
 
-	input := make(chan RefSeq, Threads)
+	input := make(chan *RefSeq, Threads)
 	doneAll := make(chan int)
 
 	poolMaskResult := &sync.Pool{New: func() interface{} {
@@ -320,7 +342,7 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 		for ref := range input {
 			tokens <- 1
 			wg.Add(1)
-			go func(ref RefSeq) {
+			go func(ref *RefSeq) {
 				_kmers, locses, err := idx.lh.Mask(ref.Seq)
 				if err != nil {
 					panic(err)
@@ -331,8 +353,11 @@ func (idx *Index) BatchInsert() (chan RefSeq, chan int) {
 				m.Locses = locses
 				m.ID = ref.ID
 				m.RefSeqSize = ref.RefSeqSize
-				m.SeqSizes = ref.SeqSizes
+				m.SeqSizes = m.SeqSizes[:0]
+				m.SeqSizes = append(m.SeqSizes, ref.SeqSizes...)
 				ch <- m
+
+				PoolRefSeq.Put(ref)
 
 				wg.Done()
 				<-tokens

@@ -3,10 +3,10 @@ module github.com/shenwei356/lexichash
 go 1.21
 
 require (
-	github.com/shenwei356/bio v0.9.3
+	github.com/shenwei356/bio v0.10.0
 	github.com/shenwei356/kmers v0.1.0
 	github.com/shenwei356/util v0.5.0
-	github.com/shenwei356/xopen v0.3.1
+	github.com/shenwei356/xopen v0.3.2
 	github.com/twotwotwo/sorts v0.0.0-20160814051341-bf5c1f2b8553
 )
 
