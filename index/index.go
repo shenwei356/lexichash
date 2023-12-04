@@ -110,13 +110,28 @@ var Threads = runtime.NumCPU()
 
 // Insert adds a new reference sequence to the index.
 // Note that this method is not concurrency-safe,
-// you can use BatchInsert, which is faster.
+// BatchInsert is recommended, which is faster and safer.
 func (idx *Index) Insert(id []byte, s []byte, seqSize int, seqSizes []int) error {
 	if idx.batchInsert {
 		return ErrKConcurrentInsert
 	}
 
-	_kmers, locses, err := idx.lh.Mask(s)
+	// compute regions to skip
+	var skipRegions [][2]int
+	if len(seqSizes) > 1 {
+		k := idx.K()
+		skipRegions = make([][2]int, len(seqSizes)-1)
+		var n int // len of concatenated seqs
+		for i, s := range seqSizes {
+			if i > 0 {
+				skipRegions[i-1] = [2]int{n, n + k - 1}
+				n += k - 1
+			}
+			n += s
+		}
+	}
+
+	_kmers, locses, err := idx.lh.Mask(s, skipRegions)
 	if err != nil {
 		return err
 	}
@@ -235,7 +250,7 @@ type MaskResult struct {
 	SeqSizes   []int // lengths of each sequences
 }
 
-// BatchInsert insert a reference sequence in parallel.
+// BatchInsert inserts reference sequences in parallel.
 // It returns:
 //
 //	chan RefSeq, for sending sequence.
@@ -246,19 +261,22 @@ type MaskResult struct {
 //
 //	input, done := BatchInsert()
 //
-// refseq := index.PoolRefSeq.Get().(*index.RefSeq)
-// refseq.Reset()
+//	refseq := index.PoolRefSeq.Get().(*index.RefSeq)
+//	refseq.Reset()
 //
-// // record is a fastx.Record//
-// refseq.ID = append(refseq.ID, record.ID...)
-// refseq.Seq = append(refseq.Seq, record.Seq.Seq...)
-// refseq.SeqSizes = append(refseq.SeqSizes, len(record.Seq.Seq))
-// refseq.RefSeqSize = len(record.Seq.Seq)
+//	// record is a fastx.Record//
+//	refseq.ID = append(refseq.ID, record.ID...)
+//	refseq.Seq = append(refseq.Seq, record.Seq.Seq...)
+//	refseq.SeqSizes = append(refseq.SeqSizes, len(record.Seq.Seq))
+//	refseq.RefSeqSize = len(record.Seq.Seq)
 //
-// input <- refseq
+//	input <- refseq
 //
-// close(input)
-// <- done
+//	close(input)
+//	<- done
+//
+// Multiple sequences can also be concatenated with (K-1) N's for being a single sequence.
+// In this case, k-mers around the (K-1) N's regions will be ignored.
 func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 	if idx.batchInsert {
 		panic(ErrKConcurrentInsert)
@@ -343,7 +361,23 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 			tokens <- 1
 			wg.Add(1)
 			go func(ref *RefSeq) {
-				_kmers, locses, err := idx.lh.Mask(ref.Seq)
+				// compute regions to skip
+				var skipRegions [][2]int
+				if len(ref.SeqSizes) > 1 {
+					k := idx.K()
+					skipRegions = make([][2]int, len(ref.SeqSizes)-1)
+					var n int // len of concatenated seqs
+					for i, s := range ref.SeqSizes {
+						if i > 0 {
+							skipRegions[i-1] = [2]int{n, n + k - 1}
+							n += k - 1
+						}
+						n += s
+					}
+				}
+
+				// capture k-mers
+				_kmers, locses, err := idx.lh.Mask(ref.Seq, skipRegions)
 				if err != nil {
 					panic(err)
 				}

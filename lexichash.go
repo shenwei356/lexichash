@@ -139,7 +139,7 @@ func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
 		copy(masks[j*n:(j+1)*n], bases)
 	}
 	if nMasks%n != 0 { // randomly sampling for left
-		rand.Shuffle(n, func(i, j int) { bases[i], bases[j] = bases[j], bases[i] })
+		r.Shuffle(n, func(i, j int) { bases[i], bases[j] = bases[j], bases[i] })
 		copy(masks[j*n:], bases[:nMasks%n])
 	}
 
@@ -254,7 +254,11 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 //  1. the list of the most similar k-mers for each mask.
 //  2. the start 0-based positions of all k-mers, with the last 2 bits as the strand
 //     flag (1 for negative strand).
-func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
+//
+// skipRegions is optional, which is used to skip some masked regions.
+// The regions should be 0-based and sorted in increasing order.
+// e.g., [100, 130], [200, 230] ...
+func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	// this one only supports k<=31, with the last two bits as a flag
@@ -285,12 +289,41 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	m1 := lh.m1
 	var maskIdxs *[]int
 
+	checkRegion := len(skipRegions) > 0
+	var ri, rs, re int
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+	}
+
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
+		if kmer == 0 { // all bases are A's or N's.
+			continue
+		}
+
 		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == len(skipRegions) { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+					}
+				}
+
+				continue
+			}
+		}
+
 		js = j << 2
 
 		// ---------- positive strand ----------
@@ -392,12 +425,39 @@ func (lh *LexicHash) Mask(s []byte) (*[]uint64, *[][]int, error) {
 	}
 
 	iter, _ = iterator.NewKmerIterator(s, lh.K)
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+	}
+
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
+
+		if kmer == 0 { // all bases are A's or N's.
+			continue
+		}
+
 		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == len(skipRegions) { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+					}
+				}
+				continue
+			}
+		}
+
 		js = j << 2
 
 		// ---------- positive strand ----------

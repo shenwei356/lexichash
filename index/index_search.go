@@ -218,7 +218,7 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
-	_kmers, _locses, err := idx.lh.Mask(s)
+	_kmers, _locses, err := idx.lh.Mask(s, nil)
 	if err != nil {
 		return nil, err
 	}
