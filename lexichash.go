@@ -176,6 +176,7 @@ func (lh *LexicHash) indexMasks() {
 	k := lh.K
 	var prefix uint64
 	var list *[]int
+
 	// 5
 	m := make([]*[]int, 1<<(5<<1))
 	for i, mask := range lh.Masks {
@@ -408,8 +409,9 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	}
 
 	// -------------------------------------------------
-	// some mask may do not have any matches,
-	// use the classic method for them
+	// some masks may do not have any matches,
+	// use the classic metho for them, i.e., compare with all
+	// masks one by one.
 
 	noMatches := lh.poolList.Get().(*[]int)
 	*noMatches = (*noMatches)[:0]
