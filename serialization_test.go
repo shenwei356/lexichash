@@ -30,7 +30,7 @@ func TestSerialization(t *testing.T) {
 	nMasks := 1000
 	var seed int64 = 1
 
-	lh, err := NewWithSeed(k, nMasks, seed)
+	lh, err := NewWithSeed(k, nMasks, seed, 0)
 	if err != nil {
 		t.Error(err)
 		return

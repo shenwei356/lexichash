@@ -52,7 +52,7 @@ func TestHash(t *testing.T) {
 
 	// use the same sequence to build the index
 
-	idx, err := NewIndexWithSeed(k, nMasks, seed)
+	idx, err := NewIndexWithSeed(k, nMasks, seed, 0)
 	if err != nil {
 		t.Error(err)
 		return
@@ -89,7 +89,7 @@ func TestIndex(t *testing.T) {
 	nMasks := 1000
 	var seed int64 = 1
 
-	idx, err := NewIndexWithSeed(k, nMasks, seed)
+	idx, err := NewIndexWithSeed(k, nMasks, seed, 0)
 	if err != nil {
 		t.Error(err)
 		return

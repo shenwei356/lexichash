@@ -38,7 +38,7 @@ func TestSerialization(t *testing.T) {
 	nMasks := 1000
 	var seed int64 = 1
 
-	idx, err := NewIndexWithSeed(k, nMasks, seed)
+	idx, err := NewIndexWithSeed(k, nMasks, seed, 0)
 	if err != nil {
 		t.Error(err)
 		return

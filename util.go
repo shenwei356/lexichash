@@ -66,3 +66,41 @@ func MustDecode(code uint64, k uint8) []byte {
 
 // Strands could be used to output strand for a reverse complement flag
 var Strands = [2]byte{'+', '-'}
+
+// IsLowComplexity check if a k-mer is of low-complexity.
+func IsLowComplexity(code uint64, k int) bool {
+	bases := MustDecode(code, uint8(k))
+
+	count := make(map[string]int, k)
+	_ke := k / 2
+	var e, i, c int
+	var s string
+	for _k := 2; _k <= _ke; _k++ {
+		clear(count)
+		e = k - _k
+		for i = 0; i <= e; i++ {
+			s = string(bases[i : i+_k])
+			count[s]++
+		}
+		for s, c = range count {
+			if c == 1 {
+				continue
+			}
+
+			// c>=4:
+			//   1. >=2mer * 4
+			//   2. poly N longer longer than 4: like AAAAA
+			// len(s)+c >= 6:
+			//   1. 2mer for >=4 times
+			//   2. 3mer for >=3 times
+			//   3. 4+mer for >=2 times
+			// fmt.Printf("%s, %s, len:%d, count:%d\n", MustDecode(code, uint8(k)), s, len(s), c)
+			if c >= 4 || len(s)+c >= 6 {
+				// fmt.Printf("%s, %s, len:%d, count:%d\n", MustDecode(code, uint8(k)), s, len(s), c)
+				return true
+			}
+		}
+	}
+
+	return false
+}

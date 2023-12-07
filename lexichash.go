@@ -66,14 +66,18 @@ type LexicHash struct {
 // New returns a new LexicHash object.
 // nMasks better be >= 1024 and better be power of 4,
 // i.e., 4, 16, 64, 256, 1024, 4096 ...
-func New(k int, nMasks int) (*LexicHash, error) {
-	return NewWithSeed(k, nMasks, 1)
+// p is the length of mask k-mer prefixes which need to be checked for low-complexity.
+// p == 0 for no checking.
+func New(k int, nMasks int, p int) (*LexicHash, error) {
+	return NewWithSeed(k, nMasks, 1, p)
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
 // nMasks better be >= 1024 and better be power of 4,
 // i.e., 4, 16, 64, 256, 1024, 4096 ...
-func NewWithSeed(k int, nMasks int, randSeed int64) (*LexicHash, error) {
+// p is the length of mask k-mer prefixes which need to be checked for low-complexity.
+// p == 0 for no checking.
+func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
 	if k < 5 || k > 32 {
 		return nil, ErrKOverflow
 	}
@@ -85,7 +89,7 @@ func NewWithSeed(k int, nMasks int, randSeed int64) (*LexicHash, error) {
 
 	// ------------ generate masks ------------
 
-	masks := genRandomMasks(k, nMasks, randSeed)
+	masks := genRandomMasks(k, nMasks, randSeed, p)
 
 	lh.Masks = masks
 	lh.indexMasks()
@@ -115,11 +119,12 @@ func NewWithSeed(k int, nMasks int, randSeed int64) (*LexicHash, error) {
 	return lh, nil
 }
 
-func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
+// p is the length of prefixes which need to be checked for low-complexity.
+func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	masks := make([]uint64, nMasks)
 	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
 	r := rand.New(rand.NewSource(randSeed))
-	// var _mask uint64 = 1<<(k<<1) - 1
+	checkLC := p > 0
 
 	// generate 4^x prefix
 	nPrefix := 1
@@ -128,9 +133,22 @@ func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
 	}
 	nPrefix--
 	n := 1 << (nPrefix << 1)
-	bases := make([]uint64, n)
-	for i := 0; i < n; i++ {
-		bases[i] = uint64(i)
+	var bases []uint64
+	if checkLC && nPrefix >= 5 { // filter out k-mer with a prefixe of AAAAA, CCCCC, GGGGG or TTTTT
+		bases = make([]uint64, 0, n)
+		for i := 0; i < n; i++ {
+			if IsLowComplexity(uint64(i), nPrefix) {
+				// fmt.Printf("%s\n", kmers.Decode(uint64(i), nPrefix))
+				continue
+			}
+			bases = append(bases, uint64(i))
+		}
+		n = len(bases)
+	} else {
+		bases = make([]uint64, n)
+		for i := 0; i < n; i++ {
+			bases[i] = uint64(i)
+		}
 	}
 
 	// distribute these prefixes
@@ -150,15 +168,31 @@ func genRandomMasks(k int, nMasks int, randSeed int64) []uint64 {
 	var v uint64
 	var i int
 	var ok bool
+	var prefix uint64
+	var tries int
 	for {
 		v = r.Uint64()
 		mask = util.Hash64(v)&_mask | masks[i]<<shiftP
+
+		if checkLC {
+			prefix = mask >> ((k - p) << 1)
+			if IsLowComplexity(prefix, p) {
+				// fmt.Printf("%d, %s\n", i, MustDecode(prefix, uint8(p)))
+				tries++
+				if tries <= 10 {
+					continue
+				}
+				// give up trying
+			}
+		}
+
 		if _, ok = m[mask]; ok {
 			continue
 		}
 		masks[i] = mask
 		m[mask] = struct{}{}
 		i++
+		tries = 0
 
 		if i == nMasks {
 			break

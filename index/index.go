@@ -68,15 +68,19 @@ type RefSeqInfo struct {
 // NewIndex ceates a new Index.
 // nMasks better be >= 1024 and better be power of 4,
 // i.e., 4, 16, 64, 256, 1024, 4096 ...
-func NewIndex(k int, nMasks int) (*Index, error) {
-	return NewIndexWithSeed(k, nMasks, 1)
+// p is the length of mask k-mer prefixes which need to be checked for low-complexity.
+// p == 0 for no checking.
+func NewIndex(k int, nMasks int, p int) (*Index, error) {
+	return NewIndexWithSeed(k, nMasks, 1, p)
 }
 
 // NewIndexWithSeed ceates a new Index with given seed.
 // nMasks better be >= 1024 and better be power of 4,
 // i.e., 4, 16, 64, 256, 1024, 4096 ...
-func NewIndexWithSeed(k int, nMasks int, seed int64) (*Index, error) {
-	lh, err := lexichash.NewWithSeed(k, nMasks, seed)
+// p is the length of mask k-mer prefixes which need to be checked for low-complexity.
+// p == 0 for no checking.
+func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
+	lh, err := lexichash.NewWithSeed(k, nMasks, seed, p)
 	if err != nil {
 		return nil, err
 	}
