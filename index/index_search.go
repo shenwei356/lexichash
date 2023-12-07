@@ -37,12 +37,12 @@ type SubstrPair struct {
 	TEnd   int // end position of the substring (0-based)
 
 	QRC uint8 // a flag indicating if the substring from the negative strand (1 for yes)
-	QK  uint8 // K size
+	// QK  uint8 // K size
 	TRC uint8 // a flag indicating if the substring from the negative strand (1 for yes)
 	TK  uint8 // K size
 
 	// query
-	QCode uint64 // k-mer
+	// QCode uint64 // k-mer
 
 	// target
 	TCode  uint64 // k-mer
@@ -52,14 +52,20 @@ type SubstrPair struct {
 
 // Equal tells if two SubstrPair are the same.
 func (s *SubstrPair) Equal(b *SubstrPair) bool {
-	return s.QK == b.QK && s.QCode == b.QCode && s.QBegin == b.QBegin && s.QRC == b.QRC &&
+	// return s.QK == b.QK && s.QCode == b.QCode && s.QBegin == b.QBegin && s.QRC == b.QRC &&
+	// 	s.TK == b.TK && s.TCode == b.TCode && s.TBegin == b.TBegin && s.TRC == b.TRC
+
+	return s.QBegin == b.QBegin && s.QRC == b.QRC &&
 		s.TK == b.TK && s.TCode == b.TCode && s.TBegin == b.TBegin && s.TRC == b.TRC
 }
 
 func (s SubstrPair) String() string {
-	return fmt.Sprintf("%s %d-%d rc: %d vs %s %d-%d rc: %d",
-		lexichash.MustDecode(s.QCode, s.QK), s.QBegin, s.QEnd, s.QRC,
-		lexichash.MustDecode(s.TCode, s.TK), s.TBegin, s.TEnd, s.TRC)
+	// return fmt.Sprintf("%s %d-%d rc: %d vs %s %d-%d rc: %d",
+	// 	lexichash.MustDecode(s.QCode, s.QK), s.QBegin, s.QEnd, s.QRC,
+	// 	lexichash.MustDecode(s.TCode, s.TK), s.TBegin, s.TEnd, s.TRC)
+	return fmt.Sprintf("%s %d-%d rc: %d vs %d-%d rc: %d",
+		lexichash.MustDecode(s.TCode, s.TK), s.QBegin, s.QEnd, s.QRC,
+		s.TBegin, s.TEnd, s.TRC)
 }
 
 var poolSub = &sync.Pool{New: func() interface{} {
@@ -86,30 +92,16 @@ type SearchResult struct {
 	score float64        // score for sorting
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
-	scoring bool // is score computed
-	cleaned bool // is duplicates removed
+	UniqMatches int // because some SubstrPair result from duplication of k-mers
 }
 
 func (r SearchResult) String() string {
 	return fmt.Sprintf("IdIdx: %d, Subs: %v", r.IdIdx, r.Subs)
 }
 
-// Score computes the score
+// Score computes the score.
+// You need to call Clean() first.
 func (r *SearchResult) Score() float64 {
-	if r.scoring {
-		return r.score
-	}
-
-	if !r.cleaned {
-		r.Deduplicate()
-	}
-
-	r.score = 0
-	for _, v := range *r.Subs {
-		r.score += float64(v.QK) * float64(v.QK)
-	}
-
-	r.scoring = true
 	return r.score
 }
 
@@ -148,10 +140,12 @@ func (s pairs) Less(i, j int) bool {
 	return a.QBegin < b.QBegin
 }
 
-// Deduplicate removes duplicated substrings
-func (r *SearchResult) Deduplicate() {
+// Clean removes duplicated substrings and compute the score.
+func (r *SearchResult) Clean() {
 	if len(*r.Subs) == 1 {
-		r.cleaned = true
+		r.UniqMatches = 1
+		p := (*r.Subs)[0]
+		r.score = float64(p.TK) * float64(p.TK)
 		return
 	}
 
@@ -178,20 +172,27 @@ func (r *SearchResult) Deduplicate() {
 	var p, v *SubstrPair
 	p = (*r.Subs)[0]
 	(*subs)[0] = p
+	r.UniqMatches = 1
+	r.score = float64(p.TK) * float64(p.TK)
 	for _, v = range (*r.Subs)[1:] {
 		// if v.Equal(p) || // the same
 		// 	v.QEnd <= p.QEnd { // or nested region
-		if v.QEnd <= p.QEnd && v.TEnd <= p.TEnd { // same or nested region
-			poolSub.Put(v)
-			continue
+		if v.QEnd <= p.QEnd {
+			if v.TEnd <= p.TEnd { // same or nested region
+				poolSub.Put(v)
+				continue
+			}
+		} else { // not the same query
+			r.UniqMatches++
+
+			r.score += float64(v.TK) * float64(v.TK)
 		}
+
 		*subs = append(*subs, v)
 		p = v
 	}
 	poolSubs.Put(r.Subs)
 	r.Subs = subs
-
-	r.cleaned = true
 }
 
 // RecycleSearchResult recycle search results objects
@@ -234,7 +235,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	clear(*m)
 
 	// query substring
-	var _code uint64
+	// var _code uint64
 	var _pos int
 	var _begin, _end int
 	var _rc uint8
@@ -246,9 +247,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	var rc uint8
 	trees := idx.Trees
 	K = idx.K()
+	K8 := uint8(K)
 	var locs []int
 	for i, kmer = range *_kmers { // captured k-mers by the maskes
-		// srs, ok := trees[i].Search(kmer, uint8(k), minPrefix)
 		srs, ok := trees[i].Search(kmer, minPrefix) // each on the corresponding tree
 		if !ok {
 			continue
@@ -278,10 +279,11 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					_begin, _end = _pos, _pos+_k
 				}
 
-				_code = tree.KmerPrefix(kmer, uint8(K), sr.LenPrefix)
+				// query
+				// _code = tree.KmerPrefix(kmer, K8, sr.LenPrefix)
 
 				// matched
-				code = tree.KmerPrefix(sr.Kmer, uint8(K), sr.LenPrefix)
+				code = tree.KmerPrefix(sr.Kmer, K8, sr.LenPrefix)
 
 				// multiple locations for each MATCHED k-mer
 				// but most of cases, there's only one.
@@ -300,8 +302,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 					}
 
 					_sub2 := poolSub.Get().(*SubstrPair)
-					_sub2.QCode = _code
-					_sub2.QK = _k8
+					// _sub2.QCode = _code
+					// _sub2.QK = _k8
 					_sub2.QBegin = _begin
 					_sub2.QEnd = _end
 					_sub2.QRC = _rc
@@ -320,8 +322,6 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 						r = poolSearchResult.Get().(*SearchResult)
 						r.IdIdx = idIdx
 						r.Subs = subs
-						r.cleaned = false
-						r.scoring = false
 						r.score = 0
 
 						(*m)[idIdx] = r
@@ -342,7 +342,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
 	for _, r := range *m {
-		r.Deduplicate()
+		r.Clean()
 		*rs = append(*rs, r)
 	}
 

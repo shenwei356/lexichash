@@ -77,7 +77,8 @@ func TestHash(t *testing.T) {
 			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 				v.QBegin+1, v.QEnd, Strands[v.QRC],
 				v.TBegin+1, v.TEnd, Strands[v.TRC],
-				v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
+				// v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
+				v.TK, kmers.MustDecode(v.TCode, int(v.TK)))
 		}
 	}
 	idx.RecycleSearchResult(sr)
@@ -163,7 +164,8 @@ func TestIndex(t *testing.T) {
 				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
 					v.QBegin+1, v.QEnd, Strands[v.QRC],
 					v.TBegin+1, v.TEnd, Strands[v.TRC],
-					v.QK, decoder(v.QCode, v.QK))
+					// v.QK, decoder(v.QCode, v.QK))
+					v.TK, decoder(v.TCode, v.TK))
 			}
 		}
 		idx.RecycleSearchResult(sr)

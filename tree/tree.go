@@ -379,10 +379,11 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	*results = (*results)[:0]
 
 	var npre uint8
+	var shift int = int(k0 - 32) // pre calculate it, a little bit faster
 	recursiveWalk(target, func(key uint64, v []uint64) bool {
 		// npre = KmerLongestPrefix(key0, key, k0, k0)
 		// since the k sizes are the same!
-		npre = uint8(bits.LeadingZeros64(key0^key)>>1) + k0 - 32
+		npre = uint8(bits.LeadingZeros64(key0^key)>>1 + shift)
 
 		r := poolSearchResult.Get().(*SearchResult)
 		r.Kmer = key
