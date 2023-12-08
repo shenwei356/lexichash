@@ -291,7 +291,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 //     flag (1 for negative strand).
 //
 // skipRegions is optional, which is used to skip some masked regions.
-// The regions should be 0-based and sorted in increasing order.
+// The regions should be 0-based and ascendingly sorted.
 // e.g., [100, 130], [200, 230] ...
 func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
 	// the k-mer iterator is different from that in

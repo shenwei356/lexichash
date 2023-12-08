@@ -74,11 +74,10 @@ func TestHash(t *testing.T) {
 	for i, r := range *sr {
 		t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 		for _, v := range *r.Subs {
-			t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-				v.QBegin+1, v.QEnd, Strands[v.QRC],
-				v.TBegin+1, v.TEnd, Strands[v.TRC],
-				// v.QK, kmers.MustDecode(v.QCode, int(v.QK)))
-				v.TK, kmers.MustDecode(v.TCode, int(v.TK)))
+			t.Logf("     (%3d,%3d) vs (%3d,%3d) %3d %s\n",
+				v.QBegin+1, v.QBegin+v.Len,
+				v.TBegin+1, v.TBegin+v.Len,
+				v.Len, kmers.MustDecode(v.Code, int(v.Len)))
 		}
 	}
 	idx.RecycleSearchResult(sr)
@@ -161,11 +160,10 @@ func TestIndex(t *testing.T) {
 		for i, r := range *sr {
 			t.Logf("%4s %s\n", "#"+strconv.Itoa(i+1), idx.IDs[r.IdIdx])
 			for _, v := range *r.Subs {
-				t.Logf("     (%3d,%3d, %c) vs (%3d,%3d, %c) %3d %s\n",
-					v.QBegin+1, v.QEnd, Strands[v.QRC],
-					v.TBegin+1, v.TEnd, Strands[v.TRC],
-					// v.QK, decoder(v.QCode, v.QK))
-					v.TK, decoder(v.TCode, v.TK))
+				t.Logf("     (%3d,%3d) vs (%3d,%3d) %3d %s\n",
+					v.QBegin+1, v.QBegin+v.Len,
+					v.TBegin+1, v.TBegin+v.Len,
+					v.Len, decoder(v.Code, uint8(v.Len)))
 			}
 		}
 		idx.RecycleSearchResult(sr)
