@@ -124,10 +124,10 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 		code = (iter.preCode&iter.mask1)<<2 | iter.codeBase
 
 		// compute code of revcomp kmer from previous one
-		iter.codeRC = (iter.codeBase^3)<<(iter.mask2) | (iter.preCodeRC >> 2)
+		codeRC = (iter.codeBase^3)<<(iter.mask2) | (iter.preCodeRC >> 2)
 	} else {
 		code, err = kmers.Encode(iter.kmer)
-		iter.codeRC = kmers.MustRevComp(code, iter.k)
+		codeRC = kmers.MustRevComp(code, iter.k)
 		iter.first = false
 	}
 	if err != nil {
@@ -135,10 +135,10 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	}
 
 	iter.preCode = code
-	iter.preCodeRC = iter.codeRC
+	iter.preCodeRC = codeRC
 	iter.idx++
 
-	return code, iter.codeRC, true, nil
+	return code, codeRC, true, nil
 }
 
 // Index returns current 0-baesd index.

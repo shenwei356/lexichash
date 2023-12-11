@@ -65,7 +65,7 @@ var poolSearchResults = &sync.Pool{New: func() interface{} {
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
-	score float64        // score for sorting
+	Score float64        // score for sorting
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
 	UniqMatches int // because some SubstrPair result from duplication of k-mers
@@ -75,12 +75,6 @@ func (r SearchResult) String() string {
 	return fmt.Sprintf("IdIdx: %d, Subs: %v", r.IdIdx, r.Subs)
 }
 
-// Score computes the score.
-// You need to call Clean() first.
-func (r *SearchResult) Score() float64 {
-	return r.score
-}
-
 type SearchResults []*SearchResult
 
 func (s SearchResults) Len() int      { return len(s) }
@@ -88,13 +82,13 @@ func (s SearchResults) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func (s SearchResults) Less(i, j int) bool {
 	a := s[i]
 	b := s[j]
-	if a.Score() == b.Score() {
+	if a.Score == b.Score {
 		if len(*a.Subs) == len(*b.Subs) {
 			return a.IdIdx < b.IdIdx
 		}
 		return len(*a.Subs) < len(*b.Subs)
 	}
-	return a.Score() > b.Score()
+	return a.Score > b.Score
 }
 
 // Clean removes duplicated substrings and compute the score.
@@ -102,7 +96,7 @@ func (r *SearchResult) Clean() {
 	if len(*r.Subs) == 1 {
 		r.UniqMatches = 1
 		p := (*r.Subs)[0]
-		r.score = float64(p.Len) * float64(p.Len)
+		r.Score = float64(p.Len) * float64(p.Len)
 		return
 	}
 
@@ -122,8 +116,9 @@ func (r *SearchResult) Clean() {
 	var p, v *SubstrPair
 	p = (*r.Subs)[0]
 	(*subs)[0] = p
+
 	r.UniqMatches = 1
-	r.score = float64(p.Len) * float64(p.Len)
+	r.Score = float64(p.Len) * float64(p.Len)
 	for _, v = range (*r.Subs)[1:] {
 		if v.QBegin+v.Len <= p.QBegin+p.Len {
 			if v.TBegin+v.Len <= p.TBegin+p.Len { // same or nested region
@@ -133,7 +128,7 @@ func (r *SearchResult) Clean() {
 		} else { // not the same query
 			r.UniqMatches++
 
-			r.score += float64(v.Len) * float64(v.Len)
+			r.Score += float64(v.Len) * float64(v.Len)
 		}
 
 		*subs = append(*subs, v)
@@ -184,18 +179,20 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	// query substring
 	var _pos int
 	var _begin int
-	var _rc uint8
+	var _rc bool
 
 	var code uint64
 	var K, _k int
 	var idIdx, pos, begin int
-	var rc uint8
 	trees := idx.Trees
 	K = idx.K()
 	K8 := uint8(K)
 	var locs []int
+	var srs *[]*tree.SearchResult
+	var sr *tree.SearchResult
+	var ok bool
 	for i, kmer = range *_kmers { // captured k-mers by the maskes
-		srs, ok := trees[i].Search(kmer, minPrefix) // each on the corresponding tree
+		srs, ok = trees[i].Search(kmer, minPrefix) // each on the corresponding tree
 		if !ok {
 			continue
 		}
@@ -203,17 +200,17 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 		locs = (*_locses)[i]
 
 		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer, k))
-		for _, sr := range *srs { // different k-mers
+		for _, sr = range *srs { // different k-mers
 			_k = int(sr.LenPrefix)
 
 			// multiple locations for each QUERY k-mer,
 			// but most of cases, there's only one.
 			for _, _pos = range locs {
-				_rc = uint8(_pos & 1)
+				_rc = _pos&1 > 0
 				_pos >>= 2
 
 				// query
-				if _rc > 0 {
+				if _rc { // on the negative strand
 					_begin = _pos + K - _k
 				} else {
 					_begin = _pos
@@ -227,9 +224,8 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 				for _, refpos = range sr.Values {
 					idIdx = int(refpos >> 38)
 					pos = int(refpos << 26 >> 28)
-					rc = uint8(refpos & 1)
 
-					if rc > 0 {
+					if refpos&1 > 0 {
 						begin = pos + K - _k
 					} else {
 						begin = pos
@@ -237,9 +233,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 					_sub2 := poolSub.Get().(*SubstrPair)
 					_sub2.QBegin = _begin
+					_sub2.TBegin = begin
 					_sub2.Code = code
 					_sub2.Len = _k
-					_sub2.TBegin = begin
 
 					var r *SearchResult
 					if r, ok = (*m)[idIdx]; !ok {
@@ -249,7 +245,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 						r = poolSearchResult.Get().(*SearchResult)
 						r.IdIdx = idIdx
 						r.Subs = subs
-						r.score = 0
+						r.Score = 0
 
 						(*m)[idIdx] = r
 					}
@@ -263,6 +259,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 	}
 
 	if len(*m) == 0 {
+		poolSearchResultsMap.Put(m)
 		return nil, nil
 	}
 
@@ -272,9 +269,9 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 		r.Clean()
 
 		// filter some low-confidence matches
-		if r.UniqMatches == 1 && (*r.Subs)[0].Len < 20 {
-			continue
-		}
+		// if r.UniqMatches == 1 && (*r.Subs)[0].Len < 20 {
+		// 	continue
+		// }
 		*rs = append(*rs, r)
 	}
 

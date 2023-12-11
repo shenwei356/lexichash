@@ -322,6 +322,7 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	n := t.root
 	search := key
 	var lenPrefix uint8
+	var atleast uint8
 	for {
 		// Check for key exhaution
 		if k == 0 {
@@ -359,10 +360,15 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 			// because k >= n.k
 			//
 			// this line is slow, because of RAM access of node information (cache miss)
-			lenPrefix += MustKmerLongestPrefix(search, n.prefix, k, n.k)
-			if lenPrefix >= m {
+			// lenPrefix += MustKmerLongestPrefix(search, n.prefix, k, n.k)
+			// if lenPrefix >= m {
+			// 	target = n
+			// 	break
+			// }
+
+			atleast = m - lenPrefix // just check if prefixes of m - lenPrefix bases are equal
+			if search>>((k-atleast)<<1) == n.prefix>>((n.k-atleast)<<1) {
 				target = n
-				break
 			}
 
 			break
@@ -378,16 +384,11 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 	results := poolSearchResults.Get().(*[]*SearchResult)
 	*results = (*results)[:0]
 
-	var npre uint8
 	var shift int = int(k0 - 32) // pre calculate it, a little bit faster
 	recursiveWalk(target, func(key uint64, v []uint64) bool {
-		// npre = KmerLongestPrefix(key0, key, k0, k0)
-		// since the k sizes are the same!
-		npre = uint8(bits.LeadingZeros64(key0^key)>>1 + shift)
-
 		r := poolSearchResult.Get().(*SearchResult)
 		r.Kmer = key
-		r.LenPrefix = npre
+		r.LenPrefix = uint8(bits.LeadingZeros64(key0^key)>>1 + shift)
 		r.Values = v
 
 		*results = append(*results, r)
