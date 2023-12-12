@@ -457,6 +457,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 	if len(*noMatches) == 0 { // cool, no need to continue
 		lh.poolList.Put(noMatches)
+		lh.poolHashes.Put(hashes)
 		return _kmers, locses, nil
 	}
 
@@ -549,6 +550,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		}
 	}
 
+	lh.poolHashes.Put(hashes)
 	lh.poolList.Put(noMatches)
 	return _kmers, locses, nil
 }

@@ -338,6 +338,7 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 		// Consume the search prefix
 		// if KmerHasPrefix(search, n.prefix, k, n.k) {
 		// if search>>((k-n.k)<<1) == n.prefix { // manually inline code
+		// this line is slow, because of RAM access of node information (cache miss)
 		if MustKmerHasPrefix(search, n.prefix, k, n.k) {
 			lenPrefix += n.k
 			// already matched at least m bases
@@ -359,7 +360,6 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 			// lenPrefix += KmerLongestPrefix(search, n.prefix, k, n.k)
 			// because k >= n.k
 			//
-			// this line is slow, because of RAM access of node information (cache miss)
 			// lenPrefix += MustKmerLongestPrefix(search, n.prefix, k, n.k)
 			// if lenPrefix >= m {
 			// 	target = n
