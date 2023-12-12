@@ -102,15 +102,15 @@ type SearchResultsHeap []*SearchResult
 func (s SearchResultsHeap) Len() int      { return len(s) }
 func (s SearchResultsHeap) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func (s SearchResultsHeap) Less(i, j int) bool {
-	b := s[i]
-	a := s[j]
+	a := s[i]
+	b := s[j]
 	if a.Score == b.Score {
 		if len(*a.Subs) == len(*b.Subs) {
-			return a.IdIdx < b.IdIdx
+			return a.IdIdx > b.IdIdx
 		}
-		return len(*a.Subs) < len(*b.Subs)
+		return len(*a.Subs) > len(*b.Subs)
 	}
-	return a.Score > b.Score
+	return a.Score < b.Score
 }
 
 func (s *SearchResultsHeap) Push(x any) {
@@ -322,7 +322,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 				}
 			} else {
 				heap.Push(h, r)
-				heap.Pop(h)
+				poolSearchResult.Put(heap.Pop(h))
 			}
 		}
 		for i := len(*h) - 1; i >= 0; i-- {
