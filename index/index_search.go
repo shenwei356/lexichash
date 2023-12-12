@@ -21,7 +21,6 @@
 package index
 
 import (
-	"container/heap"
 	"fmt"
 	"sort"
 	"sync"
@@ -63,11 +62,6 @@ var poolSearchResults = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
-var poolSearchResultsHeap = &sync.Pool{New: func() interface{} {
-	tmp := SearchResultsHeap(make([]*SearchResult, 0, 128))
-	return &(tmp)
-}}
-
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
@@ -95,34 +89,6 @@ func (s SearchResults) Less(i, j int) bool {
 		return len(*a.Subs) < len(*b.Subs)
 	}
 	return a.Score > b.Score
-}
-
-type SearchResultsHeap []*SearchResult
-
-func (s SearchResultsHeap) Len() int      { return len(s) }
-func (s SearchResultsHeap) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func (s SearchResultsHeap) Less(i, j int) bool {
-	a := s[i]
-	b := s[j]
-	if a.Score == b.Score {
-		if len(*a.Subs) == len(*b.Subs) {
-			return a.IdIdx > b.IdIdx
-		}
-		return len(*a.Subs) > len(*b.Subs)
-	}
-	return a.Score < b.Score
-}
-
-func (s *SearchResultsHeap) Push(x any) {
-	*s = append(*s, x.(*SearchResult))
-}
-
-func (s *SearchResultsHeap) Pop() any {
-	old := *s
-	n := len(old)
-	x := old[n-1]
-	*s = old[0 : n-1]
-	return x
 }
 
 // Clean removes duplicated substrings and compute the score.
@@ -300,37 +266,29 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
 
-	if topN <= 0 { // keep all results
-		for _, r := range *m {
-			r.Clean()
-			*rs = append(*rs, r)
-		}
-
-		sorts.Quicksort(SearchResults(*rs))
-	} else {
-		n := 0
-		h := poolSearchResultsHeap.Get().(*SearchResultsHeap)
-		*h = (*h)[:0]
-		for _, r := range *m {
-			r.Clean()
-
-			n++
-			if n <= topN {
-				*h = append(*h, r)
-				if n == topN {
-					heap.Init(h)
-				}
-			} else {
-				heap.Push(h, r)
-				poolSearchResult.Put(heap.Pop(h))
-			}
-		}
-		for i := len(*h) - 1; i >= 0; i-- {
-			*rs = append(*rs, (*h)[i])
-		}
-		poolSearchResultsHeap.Put(h)
+	for _, r := range *m {
+		r.Clean()
+		*rs = append(*rs, r)
 	}
 
+	sorts.Quicksort(SearchResults(*rs))
+
 	poolSearchResultsMap.Put(m)
+
+	if topN > 0 && len(*rs) > topN {
+		var r *SearchResult
+		for i := topN; i < len(*rs); i++ {
+			r = (*rs)[i]
+
+			// recycle all related objets
+			for _, sub := range *r.Subs {
+				poolSub.Put(sub)
+			}
+			poolSubs.Put(r.Subs)
+			poolSearchResult.Put(r)
+		}
+		*rs = (*rs)[:topN]
+	}
+
 	return rs, nil
 }
