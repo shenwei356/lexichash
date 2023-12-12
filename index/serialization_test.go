@@ -143,7 +143,7 @@ func TestSerialization(t *testing.T) {
 
 	decoder := lexichash.MustDecoder()
 	for _, s := range queries {
-		sr, err := idx2.Search(s.Seq.Seq, uint8(minLen))
+		sr, err := idx2.Search(s.Seq.Seq, uint8(minLen), 0)
 		if err != nil {
 			t.Log(err)
 			return

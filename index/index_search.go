@@ -21,6 +21,7 @@
 package index
 
 import (
+	"container/heap"
 	"fmt"
 	"sort"
 	"sync"
@@ -62,6 +63,11 @@ var poolSearchResults = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
+var poolSearchResultsHeap = &sync.Pool{New: func() interface{} {
+	tmp := SearchResultsHeap(make([]*SearchResult, 0, 128))
+	return &(tmp)
+}}
+
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
@@ -89,6 +95,34 @@ func (s SearchResults) Less(i, j int) bool {
 		return len(*a.Subs) < len(*b.Subs)
 	}
 	return a.Score > b.Score
+}
+
+type SearchResultsHeap []*SearchResult
+
+func (s SearchResultsHeap) Len() int      { return len(s) }
+func (s SearchResultsHeap) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+func (s SearchResultsHeap) Less(i, j int) bool {
+	b := s[i]
+	a := s[j]
+	if a.Score == b.Score {
+		if len(*a.Subs) == len(*b.Subs) {
+			return a.IdIdx < b.IdIdx
+		}
+		return len(*a.Subs) < len(*b.Subs)
+	}
+	return a.Score > b.Score
+}
+
+func (s *SearchResultsHeap) Push(x any) {
+	*s = append(*s, x.(*SearchResult))
+}
+
+func (s *SearchResultsHeap) Pop() any {
+	old := *s
+	n := len(old)
+	x := old[n-1]
+	*s = old[0 : n-1]
+	return x
 }
 
 // Clean removes duplicated substrings and compute the score.
@@ -161,7 +195,7 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
-func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
+func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult, error) {
 	_kmers, _locses, err := idx.lh.Mask(s, nil)
 	if err != nil {
 		return nil, err
@@ -265,29 +299,38 @@ func (idx *Index) Search(s []byte, minPrefix uint8) (*[]*SearchResult, error) {
 
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
-	for _, r := range *m {
-		r.Clean()
 
-		// filter some low-confidence matches
-		// if r.UniqMatches == 1 && (*r.Subs)[0].Len < 20 {
-		// 	continue
-		// }
-		*rs = append(*rs, r)
+	if topN <= 0 { // keep all results
+		for _, r := range *m {
+			r.Clean()
+			*rs = append(*rs, r)
+		}
+
+		sorts.Quicksort(SearchResults(*rs))
+	} else {
+		n := 0
+		h := poolSearchResultsHeap.Get().(*SearchResultsHeap)
+		*h = (*h)[:0]
+		for _, r := range *m {
+			r.Clean()
+
+			n++
+			if n <= topN {
+				*h = append(*h, r)
+				if n == topN {
+					heap.Init(h)
+				}
+			} else {
+				heap.Push(h, r)
+				heap.Pop(h)
+			}
+		}
+		for i := len(*h) - 1; i >= 0; i-- {
+			*rs = append(*rs, (*h)[i])
+		}
+		poolSearchResultsHeap.Put(h)
 	}
 
 	poolSearchResultsMap.Put(m)
-
-	// sort by score, id index
-	// sort.Slice(*rs, func(i, j int) bool {
-	// 	a := (*rs)[i]
-	// 	b := (*rs)[j]
-	// 	if a.Score() == b.Score() {
-	// 		return a.IdIdx < b.IdIdx
-	// 	}
-	// 	return a.Score() > b.Score()
-	// })rs)
-
-	sorts.Quicksort(SearchResults(*rs))
-
 	return rs, nil
 }

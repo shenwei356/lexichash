@@ -155,7 +155,7 @@ func (idx *Index) Insert(id []byte, s []byte, seqSize int, seqSizes []int) error
 			}
 		}
 
-		idx.IDs = append(idx.IDs, id)
+		idx.IDs = append(idx.IDs, []byte(string(id)))
 		idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
 			GenomeSize: seqSize,
 			Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
@@ -205,7 +205,7 @@ func (idx *Index) Insert(id []byte, s []byte, seqSize int, seqSizes []int) error
 	}
 	wg.Wait()
 
-	idx.IDs = append(idx.IDs, id)
+	idx.IDs = append(idx.IDs, []byte(string(id)))
 	idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
 		GenomeSize: seqSize,
 		Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
@@ -254,6 +254,18 @@ type MaskResult struct {
 	SeqSizes   []int // lengths of each sequences
 }
 
+var poolMaskResult = &sync.Pool{New: func() interface{} {
+	return &MaskResult{
+		ID:       make([]byte, 0, 128),
+		SeqSizes: make([]int, 0, 128),
+	}
+}}
+
+func (r *MaskResult) Reset() {
+	r.ID = r.ID[:0]
+	r.SeqSizes = r.SeqSizes[:0]
+}
+
 // BatchInsert inserts reference sequences in parallel.
 // It returns:
 //
@@ -289,10 +301,6 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 
 	input := make(chan *RefSeq, Threads)
 	doneAll := make(chan int)
-
-	poolMaskResult := &sync.Pool{New: func() interface{} {
-		return &MaskResult{}
-	}}
 
 	go func() {
 		ch := make(chan *MaskResult, Threads)
@@ -341,7 +349,7 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				}
 				wg.Wait()
 
-				idx.IDs = append(idx.IDs, m.ID)
+				idx.IDs = append(idx.IDs, []byte(string(m.ID)))
 				idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
 					GenomeSize: m.RefSeqSize,
 					Len:        m.RefSeqSize + (len(m.SeqSizes)-1)*(k-1),
@@ -387,11 +395,11 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				}
 
 				m := poolMaskResult.Get().(*MaskResult)
+				m.Reset()
 				m.Kmers = _kmers
 				m.Locses = locses
-				m.ID = ref.ID
+				m.ID = append(m.ID, ref.ID...)
 				m.RefSeqSize = ref.RefSeqSize
-				m.SeqSizes = m.SeqSizes[:0]
 				m.SeqSizes = append(m.SeqSizes, ref.SeqSizes...)
 				ch <- m
 
