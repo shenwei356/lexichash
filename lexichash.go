@@ -32,7 +32,7 @@ import (
 )
 
 // ErrKOverflow means K > 32.
-var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [5-32]")
+var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [3-32]")
 
 // ErrInsufficientMasks means the number of masks is too small.
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=4)")
@@ -44,12 +44,13 @@ type LexicHash struct {
 	Seed  int64    // seed for generating masks
 	Masks []uint64 // masks/k-mers
 
-	// indexes for fast locating masks to compare
+	// indexes for fast locating masks to compare.
+	// m3 means using the first 3 bases as the map keys,
+	// Three has the best balance in tests using 5000 and 10000 masks,
+	// smaller or bigger values would slow down the speed significantly.
 	m1 []*[]int
 	m2 []*[]int
 	m3 []*[]int
-	m4 []*[]int
-	m5 []*[]int
 	// pool for checking masks without matches
 	poolList *sync.Pool
 
@@ -78,7 +79,7 @@ func New(k int, nMasks int, p int) (*LexicHash, error) {
 // p is the length of mask k-mer prefixes which need to be checked for low-complexity.
 // p == 0 for no checking.
 func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
-	if k < 5 || k > 32 {
+	if k < 3 || k > 32 {
 		return nil, ErrKOverflow
 	}
 	if nMasks < 4 {
@@ -211,32 +212,8 @@ func (lh *LexicHash) indexMasks() {
 	var prefix uint64
 	var list *[]int
 
-	// 5
-	m := make([]*[]int, 1<<(5<<1))
-	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 5) << 1)
-		if list = m[prefix]; list == nil {
-			m[prefix] = &[]int{i}
-		} else {
-			*list = append(*list, i)
-		}
-	}
-	lh.m5 = m
-
-	// 4
-	m = make([]*[]int, 1<<(4<<1))
-	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 4) << 1)
-		if list = m[prefix]; list == nil {
-			m[prefix] = &[]int{i}
-		} else {
-			*list = append(*list, i)
-		}
-	}
-	lh.m4 = m
-
 	// 3
-	m = make([]*[]int, 1<<(3<<1))
+	m := make([]*[]int, 1<<(3<<1))
 	for i, mask := range lh.Masks {
 		prefix = mask >> ((k - 3) << 1)
 		if list = m[prefix]; list == nil {
@@ -317,8 +294,6 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	var locs *[]int
 
 	k := lh.K
-	m5 := lh.m5
-	m4 := lh.m4
 	m3 := lh.m3
 	m2 := lh.m2
 	m1 := lh.m1
@@ -363,17 +338,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		// ---------- positive strand ----------
 
-		maskIdxs = m5[int(kmer>>((k-5)<<1))]
+		maskIdxs = m3[int(kmer>>((k-3)<<1))]
 		if maskIdxs == nil {
-			maskIdxs = m4[int(kmer>>((k-4)<<1))]
+			maskIdxs = m2[int(kmer>>((k-2)<<1))]
 			if maskIdxs == nil {
-				maskIdxs = m3[int(kmer>>((k-3)<<1))]
-				if maskIdxs == nil {
-					maskIdxs = m2[int(kmer>>((k-2)<<1))]
-					if maskIdxs == nil {
-						maskIdxs = m1[int(kmer>>((k-1)<<1))]
-					}
-				}
+				maskIdxs = m1[int(kmer>>((k-1)<<1))]
 			}
 		}
 
@@ -404,17 +373,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		js |= 1 // add the strand flag to the location
 
-		maskIdxs = m5[int(kmerRC>>((k-5)<<1))]
+		maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
 		if maskIdxs == nil {
-			maskIdxs = m4[int(kmerRC>>((k-4)<<1))]
+			maskIdxs = m2[int(kmerRC>>((k-2)<<1))]
 			if maskIdxs == nil {
-				maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
-				if maskIdxs == nil {
-					maskIdxs = m2[int(kmerRC>>((k-2)<<1))]
-					if maskIdxs == nil {
-						maskIdxs = m1[int(kmerRC>>((k-1)<<1))]
-					}
-				}
+				maskIdxs = m1[int(kmerRC>>((k-1)<<1))]
 			}
 		}
 
@@ -444,7 +407,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 	// -------------------------------------------------
 	// some masks may do not have any matches,
-	// use the classic metho for them, i.e., compare with all
+	// use the classic method for them, i.e., compare with all
 	// masks one by one.
 
 	noMatches := lh.poolList.Get().(*[]int)
