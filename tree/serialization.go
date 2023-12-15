@@ -33,9 +33,13 @@ import (
 
 var be = binary.BigEndian
 
+// Magic number for checking file format
 var Magic = [8]byte{'k', 'm', 'e', 'r', 't', 'r', 'e', 'e'}
 
+// MainVersion is use for checking compatibility
 var MainVersion uint8 = 0
+
+// MinorVersion is less important
 var MinorVersion uint8 = 1
 
 // ErrInvalidFileFormat means invalid file format.

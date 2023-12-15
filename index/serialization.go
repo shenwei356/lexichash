@@ -41,7 +41,10 @@ import (
 
 // var Magic = [8]byte{'l', 'e', 'x', 'i', 'c', 'i', 'd', 'x'}
 
+// MainVersion is use for checking compatibility
 var MainVersion uint8 = 0
+
+// MinorVersion is less important
 var MinorVersion uint8 = 1
 
 // ErrInvalidFileFormat means invalid file format.

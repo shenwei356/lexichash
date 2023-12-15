@@ -347,6 +347,9 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 						<-tokens
 					}(start, end)
 				}
+
+				// TODO: here we need to write the 2bit seq into file
+
 				wg.Wait()
 
 				idx.IDs = append(idx.IDs, []byte(string(m.ID)))
@@ -401,6 +404,10 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				m.ID = append(m.ID, ref.ID...)
 				m.RefSeqSize = ref.RefSeqSize
 				m.SeqSizes = append(m.SeqSizes, ref.SeqSizes...)
+
+				// TODO:here we need to convert the sequenc to 2bit format
+				// and save into MaskResult.
+
 				ch <- m
 
 				PoolRefSeq.Put(ref)
