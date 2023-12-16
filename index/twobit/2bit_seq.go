@@ -341,7 +341,8 @@ func (r *Reader) SubSeq(idx int, start int, end int) (*[]byte, error) {
 	if nBytes <= len(r.buf) {
 		buf = r.buf[:nBytes]
 	} else {
-		for i := 0; i < nBytes-len(r.buf); i++ {
+		n := nBytes - len(r.buf)
+		for i := 0; i < n; i++ {
 			r.buf = append(r.buf, 0)
 		}
 		buf = r.buf
@@ -350,6 +351,7 @@ func (r *Reader) SubSeq(idx int, start int, end int) (*[]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if n < nBytes {
 		return nil, ErrBrokenFile
 	}

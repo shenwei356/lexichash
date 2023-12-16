@@ -294,6 +294,38 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 
 	// alignment
 	if idx.saveTwoBit {
+		var sub *SubstrPair
+		qlen := len(s)
+		// var q *[]byte
+		var qs, qe, ts, te, begin, end int
+		rdr := <-idx.twobitReaders
+
+		for _, r := range *rs {
+			// filter seeds
+
+			// left
+			sub = (*r.Subs)[0]
+			qs = sub.QBegin
+			ts = sub.TBegin
+
+			// right
+			sub = (*r.Subs)[len(*r.Subs)-1]
+			qe = sub.QBegin + sub.Len
+			te = sub.TBegin + sub.Len
+
+			begin = ts - qs
+			if begin < 0 {
+				begin = 0
+			}
+			end = te + qlen - qe
+
+			// q, err = rdr.SubSeq(r.IdIdx, begin, end)
+			// if err != nil {
+			// 	return rs, err
+			// }
+			fmt.Printf("subject:%s:%d-%d:%s\n", idx.IDs[r.IdIdx], begin+1, end+1, *r.Subs)
+		}
+		idx.twobitReaders <- rdr
 
 	}
 
