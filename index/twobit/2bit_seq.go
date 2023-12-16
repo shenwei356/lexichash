@@ -28,6 +28,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 var be = binary.BigEndian
@@ -109,7 +110,10 @@ func NewWriter(file string) (*Writer, error) {
 
 // WriteSeq writes one sequence
 func (w *Writer) WriteSeq(s []byte) error {
-	return w.Write2Bit(Seq2TwoBit(s), len(s))
+	b2 := Seq2TwoBit(s)
+	err := w.Write2Bit(*b2, len(s))
+	RecycleTwoBit(b2)
+	return err
 }
 
 // Write writes one converted 2bit sequence.
@@ -269,7 +273,7 @@ func NewReader(file string) (*Reader, error) {
 
 	r.index = make([][3]int, int(be.Uint64(buf[:8])))
 	for i := range r.index {
-		n, err = io.ReadFull(rdr, buf)
+		n, err = io.ReadFull(rdr, buf[:24])
 		if err != nil {
 			return nil, err
 		}
@@ -288,7 +292,7 @@ func NewReader(file string) (*Reader, error) {
 }
 
 // Seq returns the sequence with index of idx (0-based).
-func (r *Reader) Seq(idx int) ([]byte, error) {
+func (r *Reader) Seq(idx int) (*[]byte, error) {
 	if idx < 0 || idx >= len(r.index) {
 		return nil, fmt.Errorf("sequence index (%d) out of range: [0, %d]", idx, len(r.index)-1)
 	}
@@ -297,7 +301,8 @@ func (r *Reader) Seq(idx int) ([]byte, error) {
 
 // SubSeq returns the subsequence of sequence (idx is 0-based),
 // from start to end (both are 0-based).
-func (r *Reader) SubSeq(idx int, start int, end int) ([]byte, error) {
+// Please call RecycleSeq() after using the result.
+func (r *Reader) SubSeq(idx int, start int, end int) (*[]byte, error) {
 	if idx < 0 || idx >= len(r.index) {
 		return nil, fmt.Errorf("sequence index (%d) out of range: [0, %d]", idx, len(r.index)-1)
 	}
@@ -323,8 +328,16 @@ func (r *Reader) SubSeq(idx int, start int, end int) ([]byte, error) {
 
 	nBytes := end>>2 - start>>2 + 1
 
-	buf2 := make([]byte, nBytes)
-	n, err := io.ReadFull(r.fh, buf2)
+	var buf []byte
+	if nBytes <= len(r.buf) {
+		buf = r.buf[:nBytes]
+	} else {
+		for i := 0; i < nBytes-len(r.buf); i++ {
+			r.buf = append(r.buf, 0)
+		}
+		buf = r.buf
+	}
+	n, err := io.ReadFull(r.fh, buf)
 	if err != nil {
 		return nil, err
 	}
@@ -333,77 +346,92 @@ func (r *Reader) SubSeq(idx int, start int, end int) ([]byte, error) {
 	}
 
 	l := end - start + 1
+
 	// initialize with l+4 blank values, because if there less than 4 bases
 	// to extract, code below would panic.
-	s := make([]byte, 4, l+4)
+	// s := make([]byte, 4, l+4)
+	s := poolSubSeq.Get().(*[]byte)
+	*s = (*s)[:4]
 
 	// -- first byte --
 
-	b := buf2[0]
+	b := buf[0]
 	j := start & 3
 
 	switch j {
 	case 0:
-		s[3] = bit2base[b&3]
+		(*s)[3] = bit2base[b&3]
 		b >>= 2
-		s[2] = bit2base[b&3]
+		(*s)[2] = bit2base[b&3]
 		b >>= 2
-		s[1] = bit2base[b&3]
+		(*s)[1] = bit2base[b&3]
 		b >>= 2
-		s[0] = bit2base[b&3]
+		(*s)[0] = bit2base[b&3]
 	case 1:
-		s[2] = bit2base[b&3]
+		(*s)[2] = bit2base[b&3]
 		b >>= 2
-		s[1] = bit2base[b&3]
+		(*s)[1] = bit2base[b&3]
 		b >>= 2
-		s[0] = bit2base[b&3]
+		(*s)[0] = bit2base[b&3]
 	case 2:
-		s[1] = bit2base[b&3]
+		(*s)[1] = bit2base[b&3]
 		b >>= 2
-		s[0] = bit2base[b&3]
+		(*s)[0] = bit2base[b&3]
 	case 3:
-		s[0] = bit2base[b&3]
+		(*s)[0] = bit2base[b&3]
 	}
 	j = 4 - j
-	s = s[:j]
+	*s = (*s)[:j]
 	if j >= l {
-		return s[:l], nil
+		tmp := (*s)[:l]
+		return &tmp, nil
 	}
 
 	// -- middle byte --
 	if nBytes > 2 {
-		for _, b = range buf2[1 : nBytes-1] {
-			s = append(s, bit2base[b>>6&3])
-			s = append(s, bit2base[b>>4&3])
-			s = append(s, bit2base[b>>2&3])
-			s = append(s, bit2base[b&3])
+		for _, b = range buf[1 : nBytes-1] {
+			*s = append(*s, bit2base[b>>6&3])
+			*s = append(*s, bit2base[b>>4&3])
+			*s = append(*s, bit2base[b>>2&3])
+			*s = append(*s, bit2base[b&3])
 		}
 	}
 
 	if nBytes > 1 {
 		// -- last byte --
-		b = buf2[nBytes-1]
+		b = buf[nBytes-1]
 		j = end & 3
 		switch j {
 		case 0:
-			s = append(s, bit2base[b>>6&3])
+			*s = append(*s, bit2base[b>>6&3])
 		case 1:
-			s = append(s, bit2base[b>>6&3])
-			s = append(s, bit2base[b>>4&3])
+			*s = append(*s, bit2base[b>>6&3])
+			*s = append(*s, bit2base[b>>4&3])
 		case 2:
-			s = append(s, bit2base[b>>6&3])
-			s = append(s, bit2base[b>>4&3])
-			s = append(s, bit2base[b>>2&3])
+			*s = append(*s, bit2base[b>>6&3])
+			*s = append(*s, bit2base[b>>4&3])
+			*s = append(*s, bit2base[b>>2&3])
 		case 3:
-			s = append(s, bit2base[b>>6&3])
-			s = append(s, bit2base[b>>4&3])
-			s = append(s, bit2base[b>>2&3])
-			s = append(s, bit2base[b&3])
+			*s = append(*s, bit2base[b>>6&3])
+			*s = append(*s, bit2base[b>>4&3])
+			*s = append(*s, bit2base[b>>2&3])
+			*s = append(*s, bit2base[b&3])
 		}
 	}
 
-	return s[:l], nil
+	tmp := (*s)[:l]
+	return &tmp, nil
 }
+
+// RecycleSeq recycles the sequence
+func RecycleSeq(s *[]byte) {
+	poolSubSeq.Put(s)
+}
+
+var poolSubSeq = &sync.Pool{New: func() interface{} {
+	tmp := make([]byte, 4, 10<<10)
+	return &tmp
+}}
 
 var base2bit = [256]uint8{
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -426,39 +454,53 @@ var base2bit = [256]uint8{
 
 var bit2base = [4]byte{'A', 'C', 'G', 'T'}
 
+// RecycleSeq recycles the sequence
+func RecycleTwoBit(b2 *[]byte) {
+	poolTwoBit.Put(b2)
+}
+
+var poolTwoBit = &sync.Pool{New: func() interface{} {
+	tmp := make([]byte, 0, 1<<20)
+	return &tmp
+}}
+
 // Seq2TwoBit converts a DNA sequence to 2bit-packed sequence.
-func Seq2TwoBit(s []byte) []byte {
+func Seq2TwoBit(s []byte) *[]byte {
 	if s == nil {
 		return nil
 	}
 	if len(s) == 0 {
-		return []byte{}
+		return &[]byte{}
 	}
 
 	n := len(s) >> 2
 	m := len(s) & 3
 
-	codes := make([]byte, n+1)
+	// codes := make([]byte, n+1)
+	codes := poolTwoBit.Get().(*[]byte)
+	*codes = (*codes)[:0]
+
 	var j int
 	for i := 0; i < n; i++ {
 		j = i << 2
 
-		codes[i] = base2bit[s[j]]<<6 + base2bit[s[j+1]]<<4 + base2bit[s[j+2]]<<2 + base2bit[s[j+3]]
+		*codes = append(*codes, base2bit[s[j]]<<6+base2bit[s[j+1]]<<4+base2bit[s[j+2]]<<2+base2bit[s[j+3]])
 	}
 
 	if m == 0 {
-		return codes[:n]
+		tmp := (*codes)[:n]
+		return &tmp
 	}
 
 	j = n << 2
 
 	switch m {
 	case 3:
-		codes[n] = base2bit[s[j]]<<6 + base2bit[s[j+1]]<<4 + base2bit[s[j+2]]<<2
+		*codes = append(*codes, base2bit[s[j]]<<6+base2bit[s[j+1]]<<4+base2bit[s[j+2]]<<2)
 	case 2:
-		codes[n] = base2bit[s[j]]<<6 + base2bit[s[j+1]]<<4
+		*codes = append(*codes, base2bit[s[j]]<<6+base2bit[s[j+1]]<<4)
 	case 1:
-		codes[n] = base2bit[s[j]] << 6
+		*codes = append(*codes, base2bit[s[j]]<<6)
 	}
 
 	return codes

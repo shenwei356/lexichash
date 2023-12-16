@@ -57,7 +57,14 @@ func TestHash(t *testing.T) {
 		t.Error(err)
 		return
 	}
-	idx.Insert([]byte("s1"), s1, len(s1), []int{len(s1)})
+
+	input, done := idx.BatchInsert()
+	input <- &RefSeq{
+		ID:  []byte("s1"),
+		Seq: s1,
+	}
+	close(input)
+	<-done
 
 	for i, info := range idx.RefSeqInfos {
 		t.Logf("%s; sum: %d, concatenated sum: %d, #seqs: %d, #sizes: %v",

@@ -94,6 +94,9 @@ const TreeFileExt = ".bin"
 // GenomeInfoFile stores some basic information of the indexed sequences.
 const GenomeInfoFile = "genome_info.bin"
 
+// TwoBitFile stores the 2bit-packed reference sequences
+const TwoBitFile = "seqs.2bit"
+
 // WriteToPath writes an index to a directory.
 //
 // Files:
@@ -101,6 +104,10 @@ const GenomeInfoFile = "genome_info.bin"
 //	Mask file, binary
 //	ID list file, plain text
 //	Trees directory, binary. Files numbers: 1-5000
+//	...
+//
+// Note that, if you plan to save reference sequences, then call SetOutputPath()
+// first. Next, you need to set 'overwrite' false when calling this method.
 func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error {
 	pwd, _ := os.Getwd()
 	if outDir != "./" && outDir != "." && pwd != filepath.Clean(outDir) {
@@ -121,7 +128,22 @@ func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error 
 						return err
 					}
 				} else {
-					return ErrDirNotEmpty
+					files, err := os.ReadDir(outDir)
+					if err != nil {
+						return err
+					}
+
+					// check if the directory is created by SetOutputPath,
+					// which only two files: seqs.2bit and seqs.2bit.idx.
+					flag := false
+					for _, file := range files {
+						if file.Name() == TwoBitFile {
+							flag = true
+						}
+					}
+					if !(flag && len(files) < 5) {
+						return ErrDirNotEmpty
+					}
 				}
 			} else {
 				err = os.RemoveAll(outDir)
@@ -193,7 +215,11 @@ func (idx *Index) WriteToPath(outDir string, overwrite bool, threads int) error 
 		return err
 	}
 
-	idx.path = outDir
+	if idx.saveTwoBit && idx.path != outDir {
+		return fmt.Errorf("please set the same path to that used in SetOutputPath()")
+	} else {
+		idx.path = outDir
+	}
 
 	return err
 }

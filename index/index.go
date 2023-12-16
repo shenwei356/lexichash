@@ -22,11 +22,16 @@ package index
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
 	"github.com/shenwei356/lexichash"
+	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
+	"github.com/shenwei356/util/pathutil"
 )
 
 // Strands could be used to output strand for a reverse complement flag
@@ -52,17 +57,16 @@ type Index struct {
 	RefSeqInfos []RefSeqInfo // Reference sequence basic information
 	i           uint32       // curent index, for inserting a new ref seq
 
+	// ------------- optional -------------
+
 	path string // path of the index directory
 
 	KmerLocations [][]uint64 // mask locations of each reference genomes
-}
 
-// GenomeInfo is a struct to store some basic information of a ref seq
-type RefSeqInfo struct {
-	GenomeSize int   // bases of all sequences
-	Len        int   // length of contatenated sequences
-	NumSeqs    int   // number of sequences
-	SeqSizes   []int // sizes of sequences
+	// for writing and reading 2bit-packed sequences
+	saveTwoBit   bool
+	twobitWriter *twobit.Writer
+	twobitReader *twobit.Reader
 }
 
 // NewIndex ceates a new Index.
@@ -104,6 +108,66 @@ func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
 	return idx, nil
 }
 
+// SetOutputPath sets the output directory of index.
+// If you want to save the reference sequences in 2bit-packed binary format,
+// Please calls this method right after creating a new index with NewIndex
+// or NewIndexWithSeed.
+// And later please call WriteToPath() to
+// save other data into the same output directory.
+// Why is it designed to this? Because sequences, which might be tens of GB,
+// need to be written to file during index building. While index data
+// are optionally saved.
+func (idx *Index) SetOutputPath(outDir string, overwrite bool) error {
+	pwd, _ := os.Getwd()
+	if outDir != "./" && outDir != "." && pwd != filepath.Clean(outDir) {
+		existed, err := pathutil.DirExists(outDir)
+		if err != nil {
+			return err
+		}
+		if existed {
+			empty, err := pathutil.IsEmpty(outDir)
+			if err != nil {
+				return err
+			}
+
+			if !empty {
+				if overwrite {
+					err = os.RemoveAll(outDir)
+					if err != nil {
+						return err
+					}
+				} else {
+					return ErrDirNotEmpty
+				}
+			} else {
+				err = os.RemoveAll(outDir)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		err = os.MkdirAll(outDir, 0777)
+		if err != nil {
+			return err
+		}
+	} else {
+		return ErrPWDAsOutDir
+	}
+
+	idx.path = outDir
+
+	twobitFile := filepath.Join(outDir, TwoBitFile)
+	var err error
+	idx.twobitWriter, err = twobit.NewWriter(twobitFile)
+	if err != nil {
+		return fmt.Errorf("fail to write 2bit seq file: %s", twobitFile)
+	}
+
+	idx.saveTwoBit = true
+
+	return nil
+}
+
 // K returns the K value
 func (idx *Index) K() int {
 	return int(idx.k)
@@ -112,109 +176,12 @@ func (idx *Index) K() int {
 // Threads is the maximum concurrency number for Insert() and ParallelizedSearch().
 var Threads = runtime.NumCPU()
 
-// Insert adds a new reference sequence to the index.
-// Note that this method is not concurrency-safe,
-// BatchInsert is recommended, which is faster and safer.
-func (idx *Index) Insert(id []byte, s []byte, seqSize int, seqSizes []int) error {
-	if idx.batchInsert {
-		return ErrKConcurrentInsert
-	}
-
-	// compute regions to skip
-	var skipRegions [][2]int
-	if len(seqSizes) > 1 {
-		k := idx.K()
-		skipRegions = make([][2]int, len(seqSizes)-1)
-		var n int // len of concatenated seqs
-		for i, s := range seqSizes {
-			if i > 0 {
-				skipRegions[i-1] = [2]int{n, n + k - 1}
-				n += k - 1
-			}
-			n += s
-		}
-	}
-
-	_kmers, locses, err := idx.lh.Mask(s, skipRegions)
-	if err != nil {
-		return err
-	}
-	defer idx.lh.RecycleMaskResult(_kmers, locses)
-
-	if Threads == 1 {
-		var loc int
-		var refpos uint64
-		for i, kmer := range *_kmers {
-			for _, loc = range (*locses)[i] {
-				//  ref idx: 26 bits
-				//  pos:     36 bits
-				//  strand:   2 bits
-				refpos = uint64(idx.i)<<38 | uint64(loc)
-
-				idx.Trees[i].Insert(kmer, refpos)
-			}
-		}
-
-		idx.IDs = append(idx.IDs, []byte(string(id)))
-		idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
-			GenomeSize: seqSize,
-			Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
-			NumSeqs:    len(seqSizes),
-			SeqSizes:   seqSizes,
-		})
-		idx.i++
-
-		return nil
-	}
-
-	if Threads <= 0 {
-		Threads = runtime.NumCPU()
-	}
-
-	var wg sync.WaitGroup
-	tokens := make(chan int, Threads)
-
-	nMasks := len(*_kmers)
-	n := nMasks/Threads + 1
-	var start, end int
-	for j := 0; j <= Threads; j++ {
-		start, end = j*n, (j+1)*n
-		if end > nMasks {
-			end = nMasks
-		}
-
-		wg.Add(1)
-		tokens <- 1
-		go func(start, end int) {
-			var kmer uint64
-			var loc int
-			var refpos uint64
-			for i := start; i < end; i++ {
-				kmer = (*_kmers)[i]
-				for _, loc = range (*locses)[i] {
-					//  ref idx: 26 bits
-					//  pos:     36 bits
-					//  strand:   2 bits
-					refpos = uint64(idx.i)<<38 | uint64(loc)
-					idx.Trees[i].Insert(kmer, refpos)
-				}
-			}
-			wg.Done()
-			<-tokens
-		}(start, end)
-	}
-	wg.Wait()
-
-	idx.IDs = append(idx.IDs, []byte(string(id)))
-	idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
-		GenomeSize: seqSize,
-		Len:        seqSize + (len(seqSizes)-1)*(idx.K()-1),
-		NumSeqs:    len(seqSizes),
-		SeqSizes:   seqSizes,
-	})
-	idx.i++
-
-	return nil
+// GenomeInfo is a struct to store some basic information of a ref seq
+type RefSeqInfo struct {
+	GenomeSize int   // bases of all sequences
+	Len        int   // length of contatenated sequences
+	NumSeqs    int   // number of sequences
+	SeqSizes   []int // sizes of sequences
 }
 
 // RefSeq represents a reference sequence to insert.
@@ -244,24 +211,26 @@ func (r *RefSeq) Reset() {
 	r.SeqSizes = r.SeqSizes[:0]
 }
 
-// MaskResult represents a mask result, it's only used in BatchInsert.
-type MaskResult struct {
+// _MaskResult represents a mask result, it's only used in BatchInsert.
+type _MaskResult struct {
 	ID     []byte
 	Kmers  *[]uint64
 	Locses *[][]int
 
 	RefSeqSize int   // genome size
 	SeqSizes   []int // lengths of each sequences
+
+	TwoBit *[]byte // back-packed sequence
 }
 
 var poolMaskResult = &sync.Pool{New: func() interface{} {
-	return &MaskResult{
+	return &_MaskResult{
 		ID:       make([]byte, 0, 128),
 		SeqSizes: make([]int, 0, 128),
 	}
 }}
 
-func (r *MaskResult) Reset() {
+func (r *_MaskResult) Reset() {
 	r.ID = r.ID[:0]
 	r.SeqSizes = r.SeqSizes[:0]
 }
@@ -303,8 +272,9 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 	doneAll := make(chan int)
 
 	go func() {
-		ch := make(chan *MaskResult, Threads)
+		ch := make(chan *_MaskResult, Threads)
 		doneInsert := make(chan int)
+		saveTwoBit := idx.saveTwoBit
 
 		// insert to tree
 		go func() {
@@ -316,11 +286,13 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 			var j, start, end int
 			var refIdx uint32
 			var k int = idx.lh.K
+			var sumLen int
 
 			for m := range ch {
 				nMasks = len(*(m.Kmers))
 				n = nMasks/Threads + 1
 				refIdx = idx.i
+				sumLen = m.RefSeqSize + (len(m.SeqSizes)-1)*(k-1)
 				for j = 0; j <= Threads; j++ {
 					start, end = j*n, (j+1)*n
 					if end > nMasks {
@@ -348,14 +320,18 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 					}(start, end)
 				}
 
-				// TODO: here we need to write the 2bit seq into file
+				// here we need to write the 2bit seq into file
+				if saveTwoBit {
+					idx.twobitWriter.Write2Bit(*m.TwoBit, sumLen)
+					twobit.RecycleTwoBit(m.TwoBit)
+				}
 
 				wg.Wait()
 
 				idx.IDs = append(idx.IDs, []byte(string(m.ID)))
 				idx.RefSeqInfos = append(idx.RefSeqInfos, RefSeqInfo{
 					GenomeSize: m.RefSeqSize,
-					Len:        m.RefSeqSize + (len(m.SeqSizes)-1)*(k-1),
+					Len:        sumLen,
 					NumSeqs:    len(m.SeqSizes),
 					SeqSizes:   m.SeqSizes,
 				})
@@ -364,6 +340,9 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				idx.lh.RecycleMaskResult(m.Kmers, m.Locses)
 				poolMaskResult.Put(m)
 
+			}
+			if saveTwoBit {
+				idx.twobitWriter.Close()
 			}
 			doneInsert <- 1
 		}()
@@ -397,7 +376,7 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 					panic(err)
 				}
 
-				m := poolMaskResult.Get().(*MaskResult)
+				m := poolMaskResult.Get().(*_MaskResult)
 				m.Reset()
 				m.Kmers = _kmers
 				m.Locses = locses
@@ -405,8 +384,11 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				m.RefSeqSize = ref.RefSeqSize
 				m.SeqSizes = append(m.SeqSizes, ref.SeqSizes...)
 
-				// TODO:here we need to convert the sequenc to 2bit format
+				// here we convert the sequence to 2bit format
 				// and save into MaskResult.
+				if saveTwoBit {
+					m.TwoBit = twobit.Seq2TwoBit(ref.Seq)
+				}
 
 				ch <- m
 

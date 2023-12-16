@@ -29,12 +29,12 @@ import (
 func TestConversion(t *testing.T) {
 	_seq := []byte("ACTAGACGACGTACGCGTACGTAGTACGATGCTCGA")
 	var s, s2 []byte
-	var b2 []byte
+	var b2 *[]byte
 	var err error
 	for n := 1; n < len(_seq); n++ {
 		s = _seq[:n]
 		b2 = Seq2TwoBit(s)
-		s2, err = TwoBit2Seq(b2, n)
+		s2, err = TwoBit2Seq(*b2, n)
 		if err != nil {
 			t.Error(err)
 			return
@@ -43,6 +43,7 @@ func TestConversion(t *testing.T) {
 			t.Errorf("expected: %s, results: %s\n", s, s2)
 			return
 		}
+		RecycleTwoBit(b2)
 	}
 }
 
@@ -70,7 +71,7 @@ func TestReadAndWrite(t *testing.T) {
 		[]byte("CATGCCACG"),
 		[]byte("ACCCTCGAGCGACTAG"),
 		[]byte("ACTAGACGACGTACGCGTACGTAGTACGATGCTCGA"),
-		[]byte("ACGCAGTCGTCATCATGCGTGTCGCATGCATGCTGCATGCTGCTGTGATGCGTCTCAGTAGATGAT"),
+		[]byte("ACGCAGTCGTCATCATGCGTGTCGCATGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACATGCTGCATGCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATGCTGTGATGCGTCTCAGTAGATGAT"),
 	}
 
 	for _, s := range _seqs {
@@ -96,8 +97,10 @@ func TestReadAndWrite(t *testing.T) {
 	}
 
 	var start, end int
-	var s1, s2 []byte
+	var s1 []byte
+	var s2 *[]byte
 	for i, s := range _seqs {
+		// subseq
 		for start = 0; start < len(s); start++ {
 			for end = start; end < len(s); end++ {
 				s2, err = r.SubSeq(i, start, end)
@@ -106,13 +109,25 @@ func TestReadAndWrite(t *testing.T) {
 					return
 				}
 				s1 = s[start : end+1]
-				if !bytes.Equal(s1, s2) {
-					t.Errorf("idx: %d:%d-%d, expected: %s, results: %s\n",
+				if !bytes.Equal(s1, *s2) {
+					t.Errorf("idx: %d:%d-%d, expected: %s, results: %s",
 						i, start, end, s1, s2)
 					return
 				}
+				RecycleSeq(s2)
 			}
 		}
+
+		// whole seq
+		s2, err = r.Seq(i)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if !bytes.Equal(s, *s2) {
+			t.Errorf("idx: %d not matched", i)
+		}
+		RecycleSeq(s2)
 	}
 
 	// clean up
