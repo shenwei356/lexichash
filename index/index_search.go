@@ -69,6 +69,8 @@ type SearchResult struct {
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
 	UniqMatches int // because some SubstrPair result from duplication of k-mers
+
+	// more about the alignment detail
 }
 
 func (r SearchResult) String() string {
@@ -288,6 +290,11 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 			poolSearchResult.Put(r)
 		}
 		*rs = (*rs)[:topN]
+	}
+
+	// alignment
+	if idx.saveTwoBit {
+
 	}
 
 	return rs, nil

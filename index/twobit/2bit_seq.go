@@ -291,6 +291,15 @@ func NewReader(file string) (*Reader, error) {
 	return r, nil
 }
 
+// Close the file handler.
+func (r *Reader) Close() error {
+	err := r.fh.Close()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Seq returns the sequence with index of idx (0-based).
 func (r *Reader) Seq(idx int) (*[]byte, error) {
 	if idx < 0 || idx >= len(r.index) {

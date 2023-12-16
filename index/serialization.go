@@ -34,6 +34,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash"
+	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/shenwei356/util/pathutil"
 	"github.com/shenwei356/xopen"
@@ -358,7 +359,41 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		}
 	}
 
+	// 2bit file
+
+	fileTwoBit := filepath.Join(outDir, TwoBitFile)
+	ok, err = pathutil.Exists(fileTwoBit)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		idx.twobitReaders = make(chan *twobit.Reader, threads)
+		for i := 0; i < threads; i++ {
+			rdr, err := twobit.NewReader(fileTwoBit)
+			if err != nil {
+				return nil, err
+			}
+			idx.twobitReaders <- rdr
+		}
+		idx.saveTwoBit = true
+	}
+
 	return idx, nil
+}
+
+// Close closes all.
+func (idx *Index) Close() error {
+	if idx.saveTwoBit {
+		close(idx.twobitReaders)
+		var err error
+		for rdr := range idx.twobitReaders {
+			err = rdr.Close()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (idx *Index) writeInfo(file string) error {

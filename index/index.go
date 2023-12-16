@@ -66,7 +66,8 @@ type Index struct {
 	// for writing and reading 2bit-packed sequences
 	saveTwoBit   bool
 	twobitWriter *twobit.Writer
-	twobitReader *twobit.Reader
+
+	twobitReaders chan *twobit.Reader // reader pool
 }
 
 // NewIndex ceates a new Index.
