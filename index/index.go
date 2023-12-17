@@ -294,6 +294,17 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 				n = nMasks/Threads + 1
 				refIdx = idx.i
 				sumLen = m.RefSeqSize + (len(m.SeqSizes)-1)*(k-1)
+
+				if saveTwoBit {
+					wg.Add(1)
+					go func() {
+						// here we need to write the 2bit seq into file
+						idx.twobitWriter.Write2Bit(*m.TwoBit, sumLen)
+						twobit.RecycleTwoBit(m.TwoBit)
+						wg.Done()
+					}()
+				}
+
 				for j = 0; j <= Threads; j++ {
 					start, end = j*n, (j+1)*n
 					if end > nMasks {
@@ -319,12 +330,6 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 						wg.Done()
 						<-tokens
 					}(start, end)
-				}
-
-				// here we need to write the 2bit seq into file
-				if saveTwoBit {
-					idx.twobitWriter.Write2Bit(*m.TwoBit, sumLen)
-					twobit.RecycleTwoBit(m.TwoBit)
 				}
 
 				wg.Wait()
