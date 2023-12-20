@@ -18,58 +18,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package util
+package index
 
-import "github.com/twotwotwo/sorts/sortutil"
+import (
+	"testing"
+)
 
-// https://gist.github.com/badboy/6267743 .
-// version with mask: https://gist.github.com/lh3/974ced188be2f90422cc .
-func Hash64(key uint64) uint64 {
-	key = (^key) + (key << 21) // key = (key << 21) - key - 1
-	key = key ^ (key >> 24)
-	key = (key + (key << 3)) + (key << 8) // key * 265
-	key = key ^ (key >> 14)
-	key = (key + (key << 2)) + (key << 4) // key * 21
-	key = key ^ (key >> 28)
-	key = key + (key << 31)
-	return key
-}
-
-func UniqUint64s(list *[]uint64) {
-	if len(*list) == 0 || len(*list) == 1 {
-		return
+func TestChaining(t *testing.T) {
+	subs := []*SubstrPair{
+		{QBegin: 50, TBegin: 950, Len: 31},
+		{QBegin: 79, TBegin: 3637976, Len: 31},
+		{QBegin: 100, TBegin: 3637997, Len: 31},
+		{QBegin: 519, TBegin: 1419, Len: 31},
+		{QBegin: 550, TBegin: 3638447, Len: 31},
+		{QBegin: 647, TBegin: 3638544, Len: 31},
 	}
-
-	sortutil.Uint64s(*list)
-
-	var i, j int
-	var p, v uint64
-	var flag bool
-	p = (*list)[0]
-	for i = 1; i < len(*list); i++ {
-		v = (*list)[i]
-		if v == p {
-			if !flag {
-				j = i // mark insertion position
-				flag = true
-			}
-			continue
-		}
-
-		if flag { // need to insert to previous position
-			(*list)[j] = v
-			j++
-		}
-		p = v
+	tmp := []*SearchResult{
+		{
+			IdIdx: 0,
+			Subs:  &subs,
+		},
 	}
-	if j > 0 {
-		*list = (*list)[:j]
-	}
-}
+	rs := &tmp
 
-// ReverseInts reverse a list of ints
-func ReverseInts(s []int) {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
+	cf := &ChainingOption{
+		MaxGap: 5000,
+	}
+	for _, r := range *rs {
+		chaining(r, cf)
 	}
 }
