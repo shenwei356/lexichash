@@ -359,6 +359,11 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		}
 	}
 
+	// chaining
+	idx.poolChainers = &sync.Pool{New: func() interface{} {
+		return NewChainer(&DefaultChainingOption)
+	}}
+
 	// 2bit file
 
 	fileTwoBit := filepath.Join(outDir, TwoBitFile)

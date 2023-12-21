@@ -162,6 +162,13 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 	return &m
 }}
 
+// SetChainingOption replace the default chaining option with a new one.
+func (idx *Index) SetChainingOption(cf *ChainingOption) {
+	idx.poolChainers = &sync.Pool{New: func() interface{} {
+		return NewChainer(cf)
+	}}
+}
+
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult, error) {

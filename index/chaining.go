@@ -30,6 +30,11 @@ type ChainingOption struct {
 	MaxGap float64
 }
 
+// DefaultChainingOption is the defalt vaule of ChainingOption.
+var DefaultChainingOption = ChainingOption{
+	MaxGap: 5000,
+}
+
 // Chainer is an object for chaining the seeds.
 // Some variables like the score tables are re-used,
 // so it could help to reduce GC load.

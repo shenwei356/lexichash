@@ -64,10 +64,12 @@ type Index struct {
 	KmerLocations [][]uint64 // mask locations of each reference genomes
 
 	// for writing and reading 2bit-packed sequences
-	saveTwoBit   bool
-	twobitWriter *twobit.Writer
-
+	saveTwoBit    bool
+	twobitWriter  *twobit.Writer
 	twobitReaders chan *twobit.Reader // reader pool
+
+	// for searching
+	poolChainers *sync.Pool
 }
 
 // NewIndex ceates a new Index.
@@ -104,6 +106,10 @@ func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
 		i:     0,
 
 		RefSeqInfos: make([]RefSeqInfo, 0, 128),
+
+		poolChainers: &sync.Pool{New: func() interface{} {
+			return NewChainer(&DefaultChainingOption)
+		}},
 	}
 
 	return idx, nil

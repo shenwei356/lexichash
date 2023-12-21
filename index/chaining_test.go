@@ -21,7 +21,6 @@
 package index
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -60,9 +59,9 @@ func TestChaining(t *testing.T) {
 	for _, r := range *rs {
 		paths, sumMaxScore := chainer.Chain(r)
 
-		fmt.Printf("sum score: %f, paths:\n", sumMaxScore)
+		t.Logf("sum score: %f, paths:\n", sumMaxScore)
 		for _, p := range *paths {
-			fmt.Printf("  %d\n", *p)
+			t.Logf("  %d\n", *p)
 		}
 
 		RecycleChainingResult(paths)
