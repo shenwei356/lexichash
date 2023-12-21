@@ -142,8 +142,12 @@ func TestSerialization(t *testing.T) {
 	minLen := 13
 
 	decoder := lexichash.MustDecoder()
+	idx.SetSearchingOptions(&SearchOptions{
+		MinPrefix: uint8(minLen),
+		TopN:      0,
+	})
 	for _, s := range queries {
-		sr, err := idx2.Search(s.Seq.Seq, uint8(minLen), 0)
+		sr, err := idx2.Search(s.Seq.Seq)
 		if err != nil {
 			t.Log(err)
 			return

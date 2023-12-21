@@ -26,6 +26,14 @@ import (
 
 func TestChaining(t *testing.T) {
 	subs := []*SubstrPair{
+		// {QBegin: 419, TBegin: 1419, Len: 31},
+		// {QBegin: 450, TBegin: 3638447, Len: 31},
+		// {QBegin: 547, TBegin: 3638544, Len: 31},
+		{QBegin: 10, TBegin: 1314, Len: 20},
+
+		{QBegin: 60, TBegin: 3395374, Len: 15},
+		{QBegin: 70, TBegin: 3395384, Len: 15},
+
 		{QBegin: 50, TBegin: 950, Len: 31},
 		{QBegin: 79, TBegin: 3637976, Len: 31},
 		{QBegin: 100, TBegin: 3637997, Len: 31},
@@ -52,9 +60,8 @@ func TestChaining(t *testing.T) {
 	}
 	rs := &tmp
 
-	cf := &ChainingOption{
-		MaxGap: 5000,
-	}
+	cf := &DefaultChainingOptions
+
 	chainer := NewChainer(cf)
 	for _, r := range *rs {
 		paths, sumMaxScore := chainer.Chain(r)

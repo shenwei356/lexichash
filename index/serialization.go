@@ -359,10 +359,8 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 		}
 	}
 
-	// chaining
-	idx.poolChainers = &sync.Pool{New: func() interface{} {
-		return NewChainer(&DefaultChainingOption)
-	}}
+	// searching
+	idx.SetSearchingOptions(&DefaultSearchOptions)
 
 	// 2bit file
 

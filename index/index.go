@@ -69,7 +69,8 @@ type Index struct {
 	twobitReaders chan *twobit.Reader // reader pool
 
 	// for searching
-	poolChainers *sync.Pool
+	searchOptions *SearchOptions
+	poolChainers  *sync.Pool
 }
 
 // NewIndex ceates a new Index.
@@ -106,11 +107,9 @@ func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
 		i:     0,
 
 		RefSeqInfos: make([]RefSeqInfo, 0, 128),
-
-		poolChainers: &sync.Pool{New: func() interface{} {
-			return NewChainer(&DefaultChainingOption)
-		}},
 	}
+
+	idx.SetSearchingOptions(&DefaultSearchOptions)
 
 	return idx, nil
 }

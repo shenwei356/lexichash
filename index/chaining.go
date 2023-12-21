@@ -25,21 +25,23 @@ import (
 	"sync"
 )
 
-// ChainingOption contains all options in chaining.
-type ChainingOption struct {
-	MaxGap float64
+// ChainingOptions contains all options in chaining.
+type ChainingOptions struct {
+	MaxGap   float64
+	MinScore float64
 }
 
-// DefaultChainingOption is the defalt vaule of ChainingOption.
-var DefaultChainingOption = ChainingOption{
-	MaxGap: 5000,
+// DefaultChainingOptions is the defalt vaule of ChainingOption.
+var DefaultChainingOptions = ChainingOptions{
+	MaxGap:   5000,
+	MinScore: 40,
 }
 
 // Chainer is an object for chaining the seeds.
 // Some variables like the score tables are re-used,
 // so it could help to reduce GC load.
 type Chainer struct {
-	cf *ChainingOption
+	options *ChainingOptions
 
 	scores        []float64
 	maxscores     []float64
@@ -48,9 +50,9 @@ type Chainer struct {
 }
 
 // NewChainer creates a new chainer.
-func NewChainer(cf *ChainingOption) *Chainer {
+func NewChainer(options *ChainingOptions) *Chainer {
 	c := &Chainer{
-		cf: cf,
+		options: options,
 
 		scores:        make([]float64, 0, 128),
 		maxscores:     make([]float64, 0, 128),
@@ -85,6 +87,25 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	subs := r.Subs
 	n := len(*subs)
 
+	var sumMaxScore float64
+
+	if n == 1 { // for one seed, just check the seed weight
+		paths := poolChains.Get().(*[]*[]int)
+		*paths = (*paths)[:0]
+
+		w := seedWeight((*subs)[0])
+		if w >= ce.options.MinScore {
+			path := poolChain.Get().(*[]int)
+			*path = (*path)[:0]
+
+			*path = append(*path, 0)
+
+			*paths = append(*paths, path)
+		}
+
+		return paths, w
+	}
+
 	var i, j, j0, k, mj int
 
 	// a list for storing triangular score matrix, the size is n*(n+1)>>1
@@ -115,7 +136,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	// compute scores
 	var s, m, d float64
 	var a, b *SubstrPair
-	cf := ce.cf
+	maxGap := ce.options.MaxGap
 	for i = 1; i < n; i++ {
 		j0 = i * (i + 1) / 2
 
@@ -129,7 +150,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 			a, b = (*subs)[i], (*subs)[j]
 
 			d = distance(a, b)
-			if d > cf.MaxGap {
+			if d > maxGap {
 				continue
 			}
 
@@ -163,7 +184,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	paths := poolChains.Get().(*[]*[]int)
 	*paths = (*paths)[:0]
 	var first bool
-	var sumMaxScore float64
+	minScore := ce.options.MinScore
 
 	path := poolChain.Get().(*[]int)
 	*path = (*path)[:0]
@@ -179,6 +200,12 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 		// all are visited
 		if i == -1 {
 			break
+		}
+
+		if first && maxscores[i] < minScore {
+			visited[i] = true
+			i--
+			continue
 		}
 
 		*path = append(*path, i) // record the seed

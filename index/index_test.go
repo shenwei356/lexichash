@@ -71,7 +71,11 @@ func TestHash(t *testing.T) {
 			idx.IDs[i], info.GenomeSize, info.Len, info.NumSeqs, info.SeqSizes)
 	}
 
-	sr, err := idx.Search(s2, uint8(minLen), 0)
+	idx.SetSearchingOptions(&SearchOptions{
+		MinPrefix: uint8(minLen),
+		TopN:      0,
+	})
+	sr, err := idx.Search(s2)
 	if err != nil {
 		t.Log(err)
 		return
@@ -152,8 +156,12 @@ func TestIndex(t *testing.T) {
 	minLen := 13
 
 	decoder := lexichash.MustDecoder()
+	idx.SetSearchingOptions(&SearchOptions{
+		MinPrefix: uint8(minLen),
+		TopN:      0,
+	})
 	for _, s := range queries {
-		sr, err := idx.Search(s.Seq.Seq, uint8(minLen), 0)
+		sr, err := idx.Search(s.Seq.Seq)
 		if err != nil {
 			t.Log(err)
 			return

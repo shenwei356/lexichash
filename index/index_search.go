@@ -162,16 +162,51 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 	return &m
 }}
 
-// SetChainingOption replace the default chaining option with a new one.
-func (idx *Index) SetChainingOption(cf *ChainingOption) {
+// SetChainingOption replaces the default chaining option with a new one.
+func (idx *Index) SetChainingOption(co *ChainingOptions) {
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
-		return NewChainer(cf)
+		return NewChainer(co)
 	}}
+}
+
+// SetSearchingOptions sets the searching options.
+// Note that it overwrites the result of SetChainingOption.
+func (idx *Index) SetSearchingOptions(so *SearchOptions) {
+	idx.searchOptions = so
+
+	co := &ChainingOptions{
+		MaxGap:   so.MaxGap,
+		MinScore: 0.1 * float64(so.MinSinglePrefix) * float64(so.MinSinglePrefix),
+	}
+
+	idx.poolChainers = &sync.Pool{New: func() interface{} {
+		return NewChainer(co)
+	}}
+}
+
+// SearchOptions defineds options used in searching.
+type SearchOptions struct {
+	// basic
+	MinPrefix       uint8 // minimum prefix length, e.g, 15
+	MinSinglePrefix uint8 // minimum prefix length of the single seed, e.g, 20
+	TopN            int   // keep the topN scores
+
+	// chaining
+	MaxGap float64
+}
+
+// DefaultSearchOptions contains default option values.
+var DefaultSearchOptions = SearchOptions{
+	MinPrefix:       15,
+	MinSinglePrefix: 20,
+	TopN:            10,
+
+	MaxGap: 5000,
 }
 
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
-func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult, error) {
+func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	_kmers, _locses, err := idx.lh.Mask(s, nil)
 	if err != nil {
 		return nil, err
@@ -201,6 +236,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 	var srs *[]*tree.SearchResult
 	var sr *tree.SearchResult
 	var ok bool
+	minPrefix := idx.searchOptions.MinPrefix
 	for i, kmer = range *_kmers { // captured k-mers by the maskes
 		srs, ok = trees[i].Search(kmer, minPrefix) // each on the corresponding tree
 		if !ok {
@@ -285,6 +321,7 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 
 	poolSearchResultsMap.Put(m)
 
+	topN := idx.searchOptions.TopN
 	if topN > 0 && len(*rs) > topN {
 		var r *SearchResult
 		for i := topN; i < len(*rs); i++ {
@@ -302,38 +339,48 @@ func (idx *Index) Search(s []byte, minPrefix uint8, topN int) (*[]*SearchResult,
 
 	// alignment
 	if idx.saveTwoBit {
-		// var sub *SubstrPair
-		// qlen := len(s)
+		var sub *SubstrPair
+		qlen := len(s)
+		var qs, qe, ts, te, begin, end int
 		// var q *[]byte
-		// var qs, qe, ts, te, begin, end int
-		// rdr := <-idx.twobitReaders
 
-		// for _, r := range *rs {
-		// filter seeds
+		var paths *[]*[]int
+		var path *[]int
 
-		// // left
-		// sub = (*r.Subs)[0]
-		// qs = sub.QBegin
-		// ts = sub.TBegin
+		chainer := idx.poolChainers.Get().(*Chainer)
 
-		// // right
-		// sub = (*r.Subs)[len(*r.Subs)-1]
-		// qe = sub.QBegin + sub.Len
-		// te = sub.TBegin + sub.Len
+		rdr := <-idx.twobitReaders
 
-		// begin = ts - qs
-		// if begin < 0 {
-		// 	begin = 0
-		// }
-		// end = te + qlen - qe
+		for _, r := range *rs {
+			// chaining
+			paths, _ = chainer.Chain(r)
+			for _, path = range *paths {
 
-		// q, err = rdr.SubSeq(r.IdIdx, begin, end)
-		// if err != nil {
-		// 	return rs, err
-		// }
-		// fmt.Printf("subject:%s:%d-%d:%s\n", idx.IDs[r.IdIdx], begin+1, end+1, *r.Subs)
-		// }
-		// idx.twobitReaders <- rdr
+				// left
+				sub = (*r.Subs)[(*path)[0]]
+				qs = sub.QBegin
+				ts = sub.TBegin
+
+				// right
+				sub = (*r.Subs)[(*path)[len(*path)-1]]
+				qe = sub.QBegin + sub.Len
+				te = sub.TBegin + sub.Len
+
+				begin = ts - qs
+				if begin < 0 {
+					begin = 0
+				}
+				end = te + qlen - qe
+
+				// q, err = rdr.SubSeq(r.IdIdx, begin, end)
+				// if err != nil {
+				// 	return rs, err
+				// }
+				fmt.Printf("subject:%s:%d-%d:%d\n", idx.IDs[r.IdIdx], begin+1, end+1, *path)
+			}
+			RecycleChainingResult(paths)
+		}
+		idx.twobitReaders <- rdr
 
 	}
 
