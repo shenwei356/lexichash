@@ -21,6 +21,7 @@
 package index
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -32,6 +33,17 @@ func TestChaining(t *testing.T) {
 		{QBegin: 519, TBegin: 1419, Len: 31},
 		{QBegin: 550, TBegin: 3638447, Len: 31},
 		{QBegin: 647, TBegin: 3638544, Len: 31},
+
+		{QBegin: 111, TBegin: 1146311, Len: 31},
+		{QBegin: 136, TBegin: 1146336, Len: 31},
+		{QBegin: 138, TBegin: 1146338, Len: 31},
+		{QBegin: 139, TBegin: 1146339, Len: 31},
+		{QBegin: 264, TBegin: 1146464, Len: 31},
+		{QBegin: 1479, TBegin: 1147679, Len: 31},
+		{QBegin: 1484, TBegin: 1147684, Len: 31},
+		{QBegin: 1543, TBegin: 1147743, Len: 31},
+		{QBegin: 1566, TBegin: 1147766, Len: 31},
+		{QBegin: 1919, TBegin: 1148119, Len: 31},
 	}
 	tmp := []*SearchResult{
 		{
@@ -45,6 +57,7 @@ func TestChaining(t *testing.T) {
 		MaxGap: 5000,
 	}
 	for _, r := range *rs {
-		chaining(r, cf)
+		paths, sumMaxScore := chaining(r, cf)
+		fmt.Println("paths:", paths, sumMaxScore)
 	}
 }

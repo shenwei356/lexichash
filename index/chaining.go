@@ -69,7 +69,7 @@ func chaining(r *SearchResult, cf *ChainingOption) ([][]int, float64) {
 			s = maxscores[i-1] + seedWeight(b) - distanceScore(d) - gapScore(a, b)
 			scores[k] = s
 
-			if s > m { // update the max score
+			if s >= m { // update the max score
 				m = s
 				mj = j
 			}
@@ -78,11 +78,12 @@ func chaining(r *SearchResult, cf *ChainingOption) ([][]int, float64) {
 		maxscoresIdxs[i] = mj
 	}
 	// print the score matrix
+	// fmt.Printf("i\tiMax\tscores\n")
 	// for i = 0; i < n; i++ {
-	// 	fmt.Printf("%d", i+1)
+	// 	fmt.Printf("%d\t%d", i, maxscoresIdxs[i])
 	// 	for j = 0; j <= i; j++ {
 	// 		k = i*(i+1)/2 + j
-	// 		fmt.Printf("\t%5.1f", scores[k])
+	// 		fmt.Printf("\t%6.2f", scores[k])
 	// 	}
 	// 	fmt.Printf("\n")
 	// }
@@ -126,7 +127,7 @@ func chaining(r *SearchResult, cf *ChainingOption) ([][]int, float64) {
 			first = true
 		}
 	}
-	// fmt.Println("paths:", paths, sumMaxScore)
+
 	return paths, sumMaxScore
 }
 
@@ -139,11 +140,7 @@ func distance(a, b *SubstrPair) float64 {
 }
 
 func distanceScore(d float64) float64 {
-	d = 0.01 * d
-	if d > 10 {
-		return 10
-	}
-	return d
+	return 0.01 * d
 }
 
 func gapScore(a, b *SubstrPair) float64 {
@@ -151,7 +148,7 @@ func gapScore(a, b *SubstrPair) float64 {
 	if gap == 0 {
 		return 0
 	}
-	return 0.01*gap + 0.5*math.Log2(gap)
+	return 0.1*gap + 0.5*math.Log2(gap)
 }
 
 func reverseInts(s []int) {
