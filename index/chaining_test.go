@@ -56,8 +56,15 @@ func TestChaining(t *testing.T) {
 	cf := &ChainingOption{
 		MaxGap: 5000,
 	}
+	chainer := NewChainer(cf)
 	for _, r := range *rs {
-		paths, sumMaxScore := chaining(r, cf)
-		fmt.Println("paths:", paths, sumMaxScore)
+		paths, sumMaxScore := chainer.Chain(r)
+
+		fmt.Printf("sum score: %f, paths:\n", sumMaxScore)
+		for _, p := range *paths {
+			fmt.Printf("  %d\n", *p)
+		}
+
+		RecycleChainingResult(paths)
 	}
 }
