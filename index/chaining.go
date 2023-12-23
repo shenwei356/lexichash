@@ -93,7 +93,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 		paths := poolChains.Get().(*[]*[]int)
 		*paths = (*paths)[:0]
 
-		w := seedWeight((*subs)[0])
+		w := seedWeight(float64((*subs)[0].Len))
 		if w >= ce.options.MinScore {
 			path := poolChain.Get().(*[]int)
 			*path = (*path)[:0]
@@ -128,7 +128,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	for i, b := range *subs { // j == i, means a path starting from this seed
 		j0 = i * (i + 1) / 2
 		k = j0 + i
-		scores[k] = seedWeight(b)
+		scores[k] = seedWeight(float64(b.Len))
 	}
 	maxscores[0] = scores[0]
 	maxscoresIdxs[0] = 0
@@ -154,7 +154,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 				continue
 			}
 
-			s = maxscores[i-1] + seedWeight(b) - distanceScore(d) - gapScore(a, b)
+			s = maxscores[i-1] + seedWeight(float64(b.Len)) - distanceScore(d) - gapScore(a, b)
 			scores[k] = s
 
 			if s >= m { // update the max score
@@ -231,8 +231,8 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	return paths, sumMaxScore
 }
 
-func seedWeight(b *SubstrPair) float64 {
-	return 0.1 * float64(b.Len) * float64(b.Len)
+func seedWeight(l float64) float64 {
+	return 0.1 * l * l
 }
 
 func distance(a, b *SubstrPair) float64 {

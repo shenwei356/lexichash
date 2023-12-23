@@ -26,10 +26,10 @@ import (
 
 func TestChaining(t *testing.T) {
 	subs := []*SubstrPair{
-		// {QBegin: 419, TBegin: 1419, Len: 31},
-		// {QBegin: 450, TBegin: 3638447, Len: 31},
-		// {QBegin: 547, TBegin: 3638544, Len: 31},
-		{QBegin: 10, TBegin: 1314, Len: 20},
+		{QBegin: 10, TBegin: 314159, Len: 20},
+
+		{QBegin: 60, TBegin: 14234, Len: 15},
+		{QBegin: 61, TBegin: 14235, Len: 15},
 
 		{QBegin: 60, TBegin: 3395374, Len: 15},
 		{QBegin: 70, TBegin: 3395384, Len: 15},

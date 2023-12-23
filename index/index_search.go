@@ -182,7 +182,7 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 
 	co := &ChainingOptions{
 		MaxGap:   so.MaxGap,
-		MinScore: 0.1 * float64(so.MinSinglePrefix) * float64(so.MinSinglePrefix),
+		MinScore: seedWeight(float64(so.MinSinglePrefix)),
 	}
 	idx.chainingOptions = co
 
