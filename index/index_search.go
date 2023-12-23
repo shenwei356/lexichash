@@ -66,12 +66,11 @@ var poolSearchResults = &sync.Pool{New: func() interface{} {
 // SearchResult stores a search result for the given query sequence.
 type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
-	Score float64        // score for sorting
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
-	UniqMatches int // because some SubstrPair result from duplication of k-mers
-
 	// more about the alignment detail
+	ChainingScore float64 // chaining score
+	Chains        *[]*[]int
 }
 
 func (r SearchResult) String() string {
@@ -85,24 +84,23 @@ func (s SearchResults) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 func (s SearchResults) Less(i, j int) bool {
 	a := s[i]
 	b := s[j]
-	if a.Score == b.Score {
+	if a.ChainingScore == b.ChainingScore {
 		if len(*a.Subs) == len(*b.Subs) {
 			return a.IdIdx < b.IdIdx
 		}
 		return len(*a.Subs) < len(*b.Subs)
 	}
-	return a.Score > b.Score
+	return a.ChainingScore > b.ChainingScore
 }
 
-// Clean removes duplicated substrings and compute the score.
-func (r *SearchResult) Clean() {
+// CleanSubstrs removes duplicated substrings pairs and computes the score.
+func (r *SearchResult) CleanSubstrs() {
 	if len(*r.Subs) == 1 {
-		r.UniqMatches = 1
-		p := (*r.Subs)[0]
-		r.Score = float64(p.Len) * float64(p.Len)
 		return
 	}
 
+	// sort substrings/seeds in ascending order based on the starting position
+	// and in descending order based on the ending position.
 	_subs := *r.Subs
 	sort.Slice(_subs, func(i, j int) bool {
 		a := _subs[i]
@@ -113,25 +111,21 @@ func (r *SearchResult) Clean() {
 		return a.QBegin < b.QBegin
 	})
 
+	// check all seeds pairs,
+	// and remove a pair with both seeds covered by the previous one.
 	subs := poolSubs.Get().(*[]*SubstrPair)
 	*subs = (*subs)[:1]
 
 	var p, v *SubstrPair
-	p = (*r.Subs)[0]
+	p = (*r.Subs)[0] // the first pair
 	(*subs)[0] = p
 
-	r.UniqMatches = 1
-	r.Score = float64(p.Len) * float64(p.Len)
 	for _, v = range (*r.Subs)[1:] {
 		if v.QBegin+v.Len <= p.QBegin+p.Len {
 			if v.TBegin+v.Len <= p.TBegin+p.Len { // same or nested region
-				poolSub.Put(v)
+				poolSub.Put(v) // do not forget to recycle the object
 				continue
 			}
-		} else { // not the same query
-			r.UniqMatches++
-
-			r.Score += float64(v.Len) * float64(v.Len)
 		}
 
 		*subs = append(*subs, v)
@@ -141,18 +135,29 @@ func (r *SearchResult) Clean() {
 	r.Subs = subs
 }
 
-// RecycleSearchResult recycle search results objects
-func (idx *Index) RecycleSearchResult(sr *[]*SearchResult) {
+// RecycleSearchResults recycles a search result object
+func (idx *Index) RecycleSearchResult(r *SearchResult) {
+	for _, sub := range *r.Subs {
+		poolSub.Put(sub)
+	}
+	poolSubs.Put(r.Subs)
+
+	for _, chain := range *r.Chains {
+		poolChain.Put(chain)
+	}
+	poolChains.Put(r.Chains)
+
+	poolSearchResult.Put(r)
+}
+
+// RecycleSearchResults recycles search results objects
+func (idx *Index) RecycleSearchResults(sr *[]*SearchResult) {
 	if sr == nil {
 		return
 	}
 
 	for _, r := range *sr {
-		for _, sub := range *r.Subs {
-			poolSub.Put(sub)
-		}
-		poolSubs.Put(r.Subs)
-		poolSearchResult.Put(r)
+		idx.RecycleSearchResult(r)
 	}
 	poolSearchResults.Put(sr)
 }
@@ -164,6 +169,7 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 
 // SetChainingOption replaces the default chaining option with a new one.
 func (idx *Index) SetChainingOption(co *ChainingOptions) {
+	idx.chainingOptions = co
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
 		return NewChainer(co)
 	}}
@@ -178,6 +184,7 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 		MaxGap:   so.MaxGap,
 		MinScore: 0.1 * float64(so.MinSinglePrefix) * float64(so.MinSinglePrefix),
 	}
+	idx.chainingOptions = co
 
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
 		return NewChainer(co)
@@ -207,19 +214,24 @@ var DefaultSearchOptions = SearchOptions{
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
+	// ----------------------------------------------------------------
+	// mask the query sequence
 	_kmers, _locses, err := idx.lh.Mask(s, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer idx.lh.RecycleMaskResult(_kmers, _locses)
 
+	// ----------------------------------------------------------------
+	// matching the captured k-mers in databases
+
+	// a map for collecting matches for each reference: IdIdex -> result
+	m := poolSearchResultsMap.Get().(*map[int]*SearchResult)
+	clear(*m) // requires go >= v1.21
+
 	var refpos uint64
 	var i int
 	var kmer uint64
-
-	// m := make(map[int]*SearchResult) // IdIdex -> result
-	m := poolSearchResultsMap.Get().(*map[int]*SearchResult)
-	clear(*m)
 
 	// query substring
 	var _pos int
@@ -238,29 +250,31 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	var ok bool
 	minPrefix := idx.searchOptions.MinPrefix
 	for i, kmer = range *_kmers { // captured k-mers by the maskes
-		srs, ok = trees[i].Search(kmer, minPrefix) // each on the corresponding tree
-		if !ok {
+		srs, ok = trees[i].Search(kmer, minPrefix) // search it on the corresponding tree
+		if !ok {                                   // no matcheds
 			continue
 		}
 
-		locs = (*_locses)[i]
+		locs = (*_locses)[i] // locations in the query
 
-		// fmt.Printf("%3d %s\n", i, kmers.Decode(kmer, k))
-		for _, sr = range *srs { // different k-mers
-			_k = int(sr.LenPrefix)
+		// multiple locations for each QUERY k-mer,
+		// but most of cases, there's only one.
+		for _, _pos = range locs {
+			_rc = _pos&1 > 0 // if on the reverse complement sequence
+			_pos >>= 2
 
-			// multiple locations for each QUERY k-mer,
-			// but most of cases, there's only one.
-			for _, _pos = range locs {
-				_rc = _pos&1 > 0
-				_pos >>= 2
+			// query
+			if _rc { // on the negative strand
+				_begin = _pos + K - _k
+			} else {
+				_begin = _pos
+			}
 
-				// query
-				if _rc { // on the negative strand
-					_begin = _pos + K - _k
-				} else {
-					_begin = _pos
-				}
+			// different k-mers in subjects,
+			// most of cases, there are more than one
+			for _, sr = range *srs {
+				// matched length
+				_k = int(sr.LenPrefix)
 
 				// matched
 				code = tree.KmerPrefix(sr.Kmer, K8, sr.LenPrefix)
@@ -291,7 +305,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 						r = poolSearchResult.Get().(*SearchResult)
 						r.IdIdx = idIdx
 						r.Subs = subs
-						r.Score = 0
+						r.ChainingScore = 0
 
 						(*m)[idIdx] = r
 					}
@@ -304,30 +318,42 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		trees[i].RecycleSearchResult(srs)
 	}
 
-	if len(*m) == 0 {
+	if len(*m) == 0 { // no results
 		poolSearchResultsMap.Put(m)
 		return nil, nil
 	}
 
+	// ----------------------------------------------------------------
+	// chaining matches for all subject sequences
+
+	minChainingScore := idx.chainingOptions.MinScore
+
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
 
+	chainer := idx.poolChainers.Get().(*Chainer)
 	for _, r := range *m {
-		r.Clean()
+		r.CleanSubstrs() // remove duplicates
+		r.Chains, r.ChainingScore = chainer.Chain(r)
+		if r.ChainingScore < minChainingScore {
+			idx.RecycleSearchResult(r) // do not forget to recycle unused objects
+			continue
+		}
 		*rs = append(*rs, r)
 	}
-
+	// sort subjects in descending order based on the score (simple statistics)
 	sorts.Quicksort(SearchResults(*rs))
 
 	poolSearchResultsMap.Put(m)
 
+	// only keep the top N targets
 	topN := idx.searchOptions.TopN
 	if topN > 0 && len(*rs) > topN {
 		var r *SearchResult
 		for i := topN; i < len(*rs); i++ {
 			r = (*rs)[i]
 
-			// recycle all related objets
+			// do not forget to recycle all related objets
 			for _, sub := range *r.Subs {
 				poolSub.Put(sub)
 			}
@@ -337,52 +363,53 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		*rs = (*rs)[:topN]
 	}
 
-	// alignment
-	if idx.saveTwoBit {
-		var sub *SubstrPair
-		qlen := len(s)
-		var qs, qe, ts, te, begin, end int
-		// var q *[]byte
+	// // ----------------------------------------------------------------
+	// // alignment
+	// if idx.saveTwoBit {
+	// 	var sub *SubstrPair
+	// 	qlen := len(s)
+	// 	var qs, qe, ts, te, begin, end int
+	// 	// var q *[]byte
 
-		var paths *[]*[]int
-		var path *[]int
+	// 	var paths *[]*[]int
+	// 	var path *[]int
 
-		chainer := idx.poolChainers.Get().(*Chainer)
+	// 	chainer := idx.poolChainers.Get().(*Chainer)
 
-		rdr := <-idx.twobitReaders
+	// 	rdr := <-idx.twobitReaders
 
-		for _, r := range *rs {
-			// chaining
-			paths, _ = chainer.Chain(r)
-			for _, path = range *paths {
+	// 	for _, r := range *rs {
+	// 		// chaining
+	// 		paths, _ = chainer.Chain(r)
+	// 		for _, path = range *paths {
 
-				// left
-				sub = (*r.Subs)[(*path)[0]]
-				qs = sub.QBegin
-				ts = sub.TBegin
+	// 			// left
+	// 			sub = (*r.Subs)[(*path)[0]]
+	// 			qs = sub.QBegin
+	// 			ts = sub.TBegin
 
-				// right
-				sub = (*r.Subs)[(*path)[len(*path)-1]]
-				qe = sub.QBegin + sub.Len
-				te = sub.TBegin + sub.Len
+	// 			// right
+	// 			sub = (*r.Subs)[(*path)[len(*path)-1]]
+	// 			qe = sub.QBegin + sub.Len
+	// 			te = sub.TBegin + sub.Len
 
-				begin = ts - qs
-				if begin < 0 {
-					begin = 0
-				}
-				end = te + qlen - qe
+	// 			begin = ts - qs
+	// 			if begin < 0 {
+	// 				begin = 0
+	// 			}
+	// 			end = te + qlen - qe
 
-				// q, err = rdr.SubSeq(r.IdIdx, begin, end)
-				// if err != nil {
-				// 	return rs, err
-				// }
-				fmt.Printf("subject:%s:%d-%d:%d\n", idx.IDs[r.IdIdx], begin+1, end+1, *path)
-			}
-			RecycleChainingResult(paths)
-		}
-		idx.twobitReaders <- rdr
+	// 			// q, err = rdr.SubSeq(r.IdIdx, begin, end)
+	// 			// if err != nil {
+	// 			// 	return rs, err
+	// 			// }
+	// 			fmt.Printf("subject:%s:%d-%d:%d\n", idx.IDs[r.IdIdx], begin+1, end+1, *path)
+	// 		}
+	// 		RecycleChainingResult(paths)
+	// 	}
+	// 	idx.twobitReaders <- rdr
 
-	}
+	// }
 
 	return rs, nil
 }

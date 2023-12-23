@@ -69,8 +69,9 @@ type Index struct {
 	twobitReaders chan *twobit.Reader // reader pool
 
 	// for searching
-	searchOptions *SearchOptions
-	poolChainers  *sync.Pool
+	chainingOptions *ChainingOptions
+	searchOptions   *SearchOptions
+	poolChainers    *sync.Pool
 }
 
 // NewIndex ceates a new Index.

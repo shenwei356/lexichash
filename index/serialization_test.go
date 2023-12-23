@@ -167,7 +167,7 @@ func TestSerialization(t *testing.T) {
 					v.Len, decoder(v.Code, uint8(v.Len)))
 			}
 		}
-		idx.RecycleSearchResult(sr)
+		idx.RecycleSearchResults(sr)
 	}
 
 	// ---------------------------------------------------

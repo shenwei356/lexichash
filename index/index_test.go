@@ -91,7 +91,7 @@ func TestHash(t *testing.T) {
 				v.Len, kmers.MustDecode(v.Code, int(v.Len)))
 		}
 	}
-	idx.RecycleSearchResult(sr)
+	idx.RecycleSearchResults(sr)
 }
 
 func TestIndex(t *testing.T) {
@@ -181,7 +181,7 @@ func TestIndex(t *testing.T) {
 					v.Len, decoder(v.Code, uint8(v.Len)))
 			}
 		}
-		idx.RecycleSearchResult(sr)
+		idx.RecycleSearchResults(sr)
 	}
 
 	// idx.Trees[666].Walk(func(code uint64, v []uint64) bool {
