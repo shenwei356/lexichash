@@ -41,8 +41,8 @@ func (s SubstrPair) String() string {
 	// return fmt.Sprintf("%s %d-%d vs %d-%d",
 	// 	kmers.MustDecode(s.Code, s.Len),
 	// 	s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len)
-	return fmt.Sprintf("%d-%d vs %d-%d",
-		s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len)
+	return fmt.Sprintf("%d-%d vs %d-%d len:%d",
+		s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len, s.Len)
 }
 
 var poolSub = &sync.Pool{New: func() interface{} {

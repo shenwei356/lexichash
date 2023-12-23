@@ -208,9 +208,14 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 			continue
 		}
 
+		j = maxscoresIdxs[i] // previous seed
+		if visited[j] {      // curent seed is abandoned
+			i--
+			continue
+		}
+
 		*path = append(*path, i) // record the seed
 		visited[i] = true        // mark as visited
-		j = maxscoresIdxs[i]     // previous seed
 		if first {
 			sumMaxScore += maxscores[i]
 			first = false
