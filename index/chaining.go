@@ -64,11 +64,11 @@ func NewChainer(options *ChainingOptions) *Chainer {
 
 // RecycleChainingResult reycles the chaining results.
 // Please remember to call this after using the results.
-func RecycleChainingResult(paths *[]*[]int) {
-	for _, path := range *paths {
-		poolChain.Put(path)
+func RecycleChainingResult(chains *[]*[]int) {
+	for _, chain := range *chains {
+		poolChain.Put(chain)
 	}
-	poolChains.Put(paths)
+	poolChains.Put(chains)
 }
 
 var poolChains = &sync.Pool{New: func() interface{} {

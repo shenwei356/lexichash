@@ -25,6 +25,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/shenwei356/lexichash/index/align"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/twotwotwo/sorts"
 )
@@ -54,6 +55,11 @@ var poolSubs = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
+var poolAlignResults = &sync.Pool{New: func() interface{} {
+	tmp := make([]*align.AlignResult, 0, 8)
+	return &tmp
+}}
+
 var poolSearchResult = &sync.Pool{New: func() interface{} {
 	return &SearchResult{}
 }}
@@ -71,6 +77,7 @@ type SearchResult struct {
 	// more about the alignment detail
 	ChainingScore float64 // chaining score
 	Chains        *[]*[]int
+	AlignResults  *[]*align.AlignResult
 }
 
 func (r SearchResult) String() string {
@@ -147,6 +154,14 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 	}
 	poolChains.Put(r.Chains)
 
+	// yes, it might be nil for some failed in chaining
+	if r.AlignResults != nil {
+		for _, ar := range *r.AlignResults {
+			align.RecycleAlignResult(ar)
+		}
+		poolAlignResults.Put(r.AlignResults)
+	}
+
 	poolSearchResult.Put(r)
 }
 
@@ -167,8 +182,8 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 	return &m
 }}
 
-// SetChainingOption replaces the default chaining option with a new one.
-func (idx *Index) SetChainingOption(co *ChainingOptions) {
+// SetChainingOptions replaces the default chaining option with a new one.
+func (idx *Index) SetChainingOptions(co *ChainingOptions) {
 	idx.chainingOptions = co
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
 		return NewChainer(co)
@@ -188,6 +203,14 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
 		return NewChainer(co)
+	}}
+}
+
+// SetAlignOptions sets the alignment options
+func (idx *Index) SetAlignOptions(ao *align.AlignOptions) {
+	idx.alignOptions = ao
+	idx.poolAligner = &sync.Pool{New: func() interface{} {
+		return align.NewAligner(ao)
 	}}
 }
 
@@ -216,6 +239,7 @@ var DefaultSearchOptions = SearchOptions{
 func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	// ----------------------------------------------------------------
 	// mask the query sequence
+
 	_kmers, _locses, err := idx.lh.Mask(s, nil)
 	if err != nil {
 		return nil, err
@@ -354,62 +378,65 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			r = (*rs)[i]
 
 			// do not forget to recycle all related objets
-			for _, sub := range *r.Subs {
-				poolSub.Put(sub)
-			}
-			poolSubs.Put(r.Subs)
-			poolSearchResult.Put(r)
+			idx.RecycleSearchResult(r)
 		}
 		*rs = (*rs)[:topN]
 	}
 
-	// // ----------------------------------------------------------------
-	// // alignment
-	// if idx.saveTwoBit {
-	// 	var sub *SubstrPair
-	// 	qlen := len(s)
-	// 	var qs, qe, ts, te, begin, end int
-	// 	// var q *[]byte
+	if !idx.saveTwoBit {
+		return rs, nil
+	}
 
-	// 	var paths *[]*[]int
-	// 	var path *[]int
+	// ----------------------------------------------------------------
+	// alignment
 
-	// 	chainer := idx.poolChainers.Get().(*Chainer)
+	var sub *SubstrPair
+	qlen := len(s)
+	var chain *[]int
+	var qs, qe, ts, te, tBegin, tEnd int
+	var tSeq *[]byte
 
-	// 	rdr := <-idx.twobitReaders
+	rdr := <-idx.twobitReaders
 
-	// 	for _, r := range *rs {
-	// 		// chaining
-	// 		paths, _ = chainer.Chain(r)
-	// 		for _, path = range *paths {
+	aligner := idx.poolAligner.Get().(*align.Aligner)
 
-	// 			// left
-	// 			sub = (*r.Subs)[(*path)[0]]
-	// 			qs = sub.QBegin
-	// 			ts = sub.TBegin
+	for _, r := range *rs {
+		ars := poolAlignResults.Get().(*[]*align.AlignResult)
+		*ars = (*ars)[:0]
+		for _, chain = range *r.Chains {
+			// left
+			sub = (*r.Subs)[(*chain)[0]]
+			qs = sub.QBegin
+			ts = sub.TBegin
 
-	// 			// right
-	// 			sub = (*r.Subs)[(*path)[len(*path)-1]]
-	// 			qe = sub.QBegin + sub.Len
-	// 			te = sub.TBegin + sub.Len
+			// right
+			sub = (*r.Subs)[(*chain)[len(*chain)-1]]
+			qe = sub.QBegin + sub.Len
+			te = sub.TBegin + sub.Len
 
-	// 			begin = ts - qs
-	// 			if begin < 0 {
-	// 				begin = 0
-	// 			}
-	// 			end = te + qlen - qe
+			tBegin = ts - qs
+			if tBegin < 0 {
+				tBegin = 0
+			}
+			tEnd = te + qlen - qe
 
-	// 			// q, err = rdr.SubSeq(r.IdIdx, begin, end)
-	// 			// if err != nil {
-	// 			// 	return rs, err
-	// 			// }
-	// 			fmt.Printf("subject:%s:%d-%d:%d\n", idx.IDs[r.IdIdx], begin+1, end+1, *path)
-	// 		}
-	// 		RecycleChainingResult(paths)
-	// 	}
-	// 	idx.twobitReaders <- rdr
+			// fmt.Printf("subject:%s:%d-%d\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1)
 
-	// }
+			tSeq, err = rdr.SubSeq(r.IdIdx, tBegin, tEnd)
+			if err != nil {
+				return rs, err
+			}
+
+			// reverse complement?
+
+			ar := aligner.Global(s, *tSeq)
+			*ars = append(*ars, ar)
+		}
+		r.AlignResults = ars
+	}
+
+	idx.poolAligner.Put(aligner)
+	idx.twobitReaders <- rdr
 
 	return rs, nil
 }
