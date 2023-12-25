@@ -26,6 +26,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash/index/align"
+	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/twotwotwo/sorts"
 )
@@ -430,7 +431,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				}
 				tEnd = ts + sub.Len + qs - 1
 				rc = true
-			} else {
+			} else { // if there's only one seed, need to check the strand information
 				tBegin = ts - qs
 				if tBegin < 0 {
 					tBegin = 0
@@ -452,6 +453,8 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 			ar := aligner.Global(s, *tSeq)
 			*ars = append(*ars, ar)
+
+			twobit.RecycleTwoBit(tSeq)
 		}
 		r.AlignResults = ars
 	}

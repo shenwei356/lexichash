@@ -134,8 +134,8 @@ var poolAlignResult = &sync.Pool{New: func() interface{} {
 func NewAligner(options *AlignOptions) *Aligner {
 	alg := &Aligner{
 		Options:  options,
-		scores:   make([]int, 1<<20),
-		pointers: make([]Pointer, 1<<20),
+		scores:   make([]int, 4<<20),
+		pointers: make([]Pointer, 4<<20),
 	}
 	return alg
 }
