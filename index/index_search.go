@@ -30,7 +30,7 @@ import (
 	"github.com/twotwotwo/sorts"
 )
 
-// SubstrPair represents a pair of found substrings.
+// SubstrPair represents a pair of found substrings/seeds.
 type SubstrPair struct {
 	QBegin int    // start position of the substring (0-based) in query
 	TBegin int    // start position of the substring (0-based) in reference
@@ -39,9 +39,6 @@ type SubstrPair struct {
 }
 
 func (s SubstrPair) String() string {
-	// return fmt.Sprintf("%s %d-%d vs %d-%d",
-	// 	kmers.MustDecode(s.Code, s.Len),
-	// 	s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len)
 	return fmt.Sprintf("%d-%d vs %d-%d len:%d",
 		s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len, s.Len)
 }
@@ -51,7 +48,7 @@ var poolSub = &sync.Pool{New: func() interface{} {
 }}
 
 var poolSubs = &sync.Pool{New: func() interface{} {
-	tmp := make([]*SubstrPair, 0, 128)
+	tmp := make([]*SubstrPair, 0, 32)
 	return &tmp
 }}
 
@@ -65,7 +62,7 @@ var poolSearchResult = &sync.Pool{New: func() interface{} {
 }}
 
 var poolSearchResults = &sync.Pool{New: func() interface{} {
-	tmp := make([]*SearchResult, 0, 128)
+	tmp := make([]*SearchResult, 0, 16)
 	return &tmp
 }}
 
@@ -84,6 +81,15 @@ func (r SearchResult) String() string {
 	return fmt.Sprintf("IdIdx: %d, Subs: %v", r.IdIdx, r.Subs)
 }
 
+func (r *SearchResult) Reset() {
+	r.IdIdx = -1
+	r.Subs = nil
+	r.ChainingScore = 0
+	r.Chains = nil
+	r.AlignResults = nil
+}
+
+// SearchResults represents a list of search results from multiple reference genomes.
 type SearchResults []*SearchResult
 
 func (s SearchResults) Len() int      { return len(s) }
@@ -128,11 +134,11 @@ func (r *SearchResult) CleanSubstrs() {
 	(*subs)[0] = p
 
 	for _, v = range (*r.Subs)[1:] {
-		if v.QBegin+v.Len <= p.QBegin+p.Len {
-			if v.TBegin+v.Len <= p.TBegin+p.Len { // same or nested region
-				poolSub.Put(v) // do not forget to recycle the object
-				continue
-			}
+		// same or nested region
+		if v.QBegin+v.Len <= p.QBegin+p.Len &&
+			v.TBegin >= p.TBegin && v.TBegin+v.Len <= p.TBegin+p.Len {
+			poolSub.Put(v) // do not forget to recycle the object
+			continue
 		}
 
 		*subs = append(*subs, v)
@@ -287,18 +293,18 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			_rc = _pos&1 > 0 // if on the reverse complement sequence
 			_pos >>= 2
 
-			// query
-			if _rc { // on the negative strand
-				_begin = _pos + K - _k
-			} else {
-				_begin = _pos
-			}
-
 			// different k-mers in subjects,
 			// most of cases, there are more than one
 			for _, sr = range *srs {
 				// matched length
 				_k = int(sr.LenPrefix)
+
+				// query
+				if _rc { // on the negative strand
+					_begin = _pos + K - _k
+				} else {
+					_begin = _pos
+				}
 
 				// matched
 				code = tree.KmerPrefix(sr.Kmer, K8, sr.LenPrefix)
@@ -330,6 +336,8 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 						r.IdIdx = idIdx
 						r.Subs = subs
 						r.ChainingScore = 0
+						r.Chains = nil       // important
+						r.AlignResults = nil // important
 
 						(*m)[idIdx] = r
 					}
@@ -394,6 +402,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	qlen := len(s)
 	var chain *[]int
 	var qs, qe, ts, te, tBegin, tEnd int
+	var rc bool
 	var tSeq *[]byte
 
 	rdr := <-idx.twobitReaders
@@ -404,21 +413,31 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		ars := poolAlignResults.Get().(*[]*align.AlignResult)
 		*ars = (*ars)[:0]
 		for _, chain = range *r.Chains {
-			// left
+			// first seed pair
 			sub = (*r.Subs)[(*chain)[0]]
 			qs = sub.QBegin
 			ts = sub.TBegin
 
-			// right
+			// the last seed pair
 			sub = (*r.Subs)[(*chain)[len(*chain)-1]]
 			qe = sub.QBegin + sub.Len
 			te = sub.TBegin + sub.Len
 
-			tBegin = ts - qs
-			if tBegin < 0 {
-				tBegin = 0
+			if te < ts { // reverse complement
+				tBegin = sub.TBegin - qlen + qe
+				if tBegin < 0 {
+					tBegin = 0
+				}
+				tEnd = ts + sub.Len + qs - 1
+				rc = true
+			} else {
+				tBegin = ts - qs
+				if tBegin < 0 {
+					tBegin = 0
+				}
+				tEnd = te + qlen - qe - 1
+				rc = false
 			}
-			tEnd = te + qlen - qe
 
 			// fmt.Printf("subject:%s:%d-%d\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1)
 
@@ -427,7 +446,9 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				return rs, err
 			}
 
-			// reverse complement?
+			if rc { // reverse complement
+				RC(*tSeq)
+			}
 
 			ar := aligner.Global(s, *tSeq)
 			*ars = append(*ars, ar)
@@ -439,4 +460,35 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	idx.twobitReaders <- rdr
 
 	return rs, nil
+}
+
+// RC compute the reverse complement sequence
+func RC(s []byte) []byte {
+	n := len(s)
+	for i := 0; i < n; i++ {
+		s[i] = rcTable[s[i]]
+	}
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+	return s
+}
+
+var rcTable = [256]byte{
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+	16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+	32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+	48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+	64, 84, 86, 71, 72, 69, 70, 67, 68, 73, 74, 77, 76, 75, 78, 79,
+	80, 81, 89, 83, 65, 85, 66, 87, 88, 82, 90, 91, 92, 93, 94, 95,
+	96, 116, 118, 103, 104, 101, 102, 99, 100, 105, 106, 109, 108, 107, 110, 111,
+	112, 113, 121, 115, 97, 117, 98, 119, 120, 114, 122, 123, 124, 125, 126, 127,
+	128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+	144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+	160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+	176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+	192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+	208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+	224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,
+	240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255,
 }

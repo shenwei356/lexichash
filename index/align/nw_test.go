@@ -45,12 +45,11 @@ func TestNW(t *testing.T) {
 		SaveAlignments: true,
 		SaveMatrix:     true,
 	})
-	var r *AlignResult
 	for _, test := range tests {
 		a = []byte(test[0])
 		b = []byte(test[1])
 
-		r = alg.Global(a, b)
+		r := alg.Global(a, b)
 
 		fmt.Printf("%s", r.Matrix)
 		fmt.Printf("matches: %d, gaps: %d, len: %d, identity: %.2f%%\n",
@@ -58,5 +57,7 @@ func TestNW(t *testing.T) {
 		fmt.Printf("%s\n", r.AlignA)
 		fmt.Printf("%s\n", r.AlignM)
 		fmt.Printf("%s\n", r.AlignB)
+
+		RecycleAlignResult(r)
 	}
 }

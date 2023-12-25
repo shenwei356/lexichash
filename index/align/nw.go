@@ -26,7 +26,7 @@ import (
 	"sync"
 )
 
-// Pointer is for saving where the maximum score comes from.
+// Pointer is for saving where the maximum score of current position comes from.
 type Pointer uint8
 
 const (
@@ -39,16 +39,16 @@ const (
 
 func (p Pointer) String() string {
 	switch p {
-	case None:
-		return "×"
+	case Match:
+		return "↘︎"
+	case Mismatch:
+		return "⇘"
 	case Top:
 		return "↓"
 	case Left:
 		return "→"
-	case Mismatch:
-		return "⇘"
-	case Match:
-		return "↘︎"
+	case None:
+		return "×"
 	}
 	return "■"
 }
@@ -96,17 +96,19 @@ type AlignResult struct {
 	Gaps    int // number of gaps
 
 	AlignA []byte // Alignment string for seq A
-	AlignM []byte // Matching symbols
-	AlignB []byte // Alignment string for seq A
-	Matrix []byte // Matrix text
+	AlignM []byte // Matching symbols, "|" for match, " " for mismatch
+	AlignB []byte // Alignment string for seq B
+
+	Matrix []byte // Matrix text, note that it's not thread-safe, only for debugging.
 }
 
-// Reset Reset all the values.
+// Reset resets all the values.
 func (r *AlignResult) Reset() {
 	r.Score = 0
 	r.Len = 0
 	r.Matches = 0
 	r.Gaps = 0
+
 	if r.AlignA != nil {
 		r.AlignA = r.AlignA[:0]
 	}
@@ -121,7 +123,7 @@ func (r *AlignResult) Reset() {
 
 var poolAlignResult = &sync.Pool{New: func() interface{} {
 	r := &AlignResult{}
-	// they are inilialized even they will not be used.
+	// they are inilialized the might not be used when SaveAlignments is false.
 	r.AlignA = make([]byte, 0, 1024)
 	r.AlignB = make([]byte, 0, 1024)
 	r.AlignM = make([]byte, 0, 1024)
