@@ -29,12 +29,16 @@ import (
 type ChainingOptions struct {
 	MaxGap   float64
 	MinScore float64
+
+	MinDistance float64 // minimum distance between two seeds
 }
 
 // DefaultChainingOptions is the defalt vaule of ChainingOption.
 var DefaultChainingOptions = ChainingOptions{
 	MaxGap:   5000,
 	MinScore: 40,
+
+	MinDistance: 5,
 }
 
 // Chainer is an object for chaining the seeds.
@@ -81,7 +85,7 @@ var poolChain = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
-// Chain find the possible seed paths.
+// Chain finds the possible seed paths.
 // Please remember to call RecycleChainingResult after using the results.
 func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	subs := r.Subs
@@ -126,7 +130,7 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 
 	// initialize
 	for i, b := range *subs { // j == i, means a path starting from this seed
-		j0 = i * (i + 1) / 2
+		j0 = i * (i + 1) >> 1
 		k = j0 + i
 		scores[k] = seedWeight(float64(b.Len))
 	}
@@ -134,11 +138,12 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 	maxscoresIdxs[0] = 0
 
 	// compute scores
-	var s, m, d float64
+	var s, m, d, g float64
 	var a, b *SubstrPair
 	maxGap := ce.options.MaxGap
+	minDistance := ce.options.MinDistance
 	for i = 1; i < n; i++ {
-		j0 = i * (i + 1) / 2
+		j0 = i * (i + 1) >> 1
 
 		// just initialize the max score, which comes from the current seed
 		k = j0 + i // starting with seed i
@@ -150,11 +155,16 @@ func (ce *Chainer) Chain(r *SearchResult) (*[]*[]int, float64) {
 			a, b = (*subs)[i], (*subs)[j]
 
 			d = distance(a, b)
-			if d > maxGap {
+			if d < minDistance {
 				continue
 			}
 
-			s = maxscores[i-1] + seedWeight(float64(b.Len)) - distanceScore(d) - gapScore(a, b)
+			g = gap(a, b)
+			if g > maxGap {
+				continue
+			}
+
+			s = maxscores[i-1] + seedWeight(float64(b.Len)) - distanceScore(d) - gapScore(g)
 			scores[k] = s
 
 			if s >= m { // update the max score
@@ -248,8 +258,11 @@ func distanceScore(d float64) float64 {
 	return 0.01 * d
 }
 
-func gapScore(a, b *SubstrPair) float64 {
-	gap := math.Abs(float64(a.QBegin - b.QBegin - a.TBegin + b.TBegin))
+func gap(a, b *SubstrPair) float64 {
+	return math.Abs(math.Abs(float64(a.QBegin-b.QBegin)) - math.Abs(float64(a.TBegin-b.TBegin)))
+}
+
+func gapScore(gap float64) float64 {
 	if gap == 0 {
 		return 0
 	}

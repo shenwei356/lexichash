@@ -26,6 +26,14 @@ import (
 
 func TestChaining(t *testing.T) {
 	subs := []*SubstrPair{
+		// different strands
+		{QBegin: 18, TBegin: 3453, Len: 31},
+		{QBegin: 18, TBegin: 3640464, Len: 31},
+		{QBegin: 1924, TBegin: 1547, Len: 31},
+		{QBegin: 1924, TBegin: 3638544, Len: 31},
+
+		// same strands
+
 		{QBegin: 182, TBegin: 1282695, Len: 26},
 		{QBegin: 182, TBegin: 1769573, Len: 26},
 		{QBegin: 315, TBegin: 1282830, Len: 15},

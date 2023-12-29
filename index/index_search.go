@@ -37,6 +37,9 @@ type SubstrPair struct {
 	TBegin int    // start position of the substring (0-based) in reference
 	Len    int    // length
 	Code   uint64 // k-mer
+
+	// are the substring from reference seq is on the negative strand.
+	RC bool
 }
 
 func (s SubstrPair) String() string {
@@ -110,6 +113,9 @@ func (s SearchResults) Less(i, j int) bool {
 // CleanSubstrs removes duplicated substrings pairs and computes the score.
 func (r *SearchResult) CleanSubstrs() {
 	if len(*r.Subs) == 1 {
+		p := (*r.Subs)[0]
+		// Here's it for fast screening, not the real chaining score
+		r.ChainingScore = float64(p.Len) * float64(p.Len)
 		return
 	}
 
@@ -134,6 +140,8 @@ func (r *SearchResult) CleanSubstrs() {
 	p = (*r.Subs)[0] // the first pair
 	(*subs)[0] = p
 
+	// Here's it for fast screening, not the real chaining score
+	r.ChainingScore = float64(p.Len) * float64(p.Len)
 	for _, v = range (*r.Subs)[1:] {
 		// same or nested region
 		if v.QBegin+v.Len <= p.QBegin+p.Len &&
@@ -141,6 +149,7 @@ func (r *SearchResult) CleanSubstrs() {
 			poolSub.Put(v) // do not forget to recycle the object
 			continue
 		}
+		r.ChainingScore += float64(v.Len) * float64(v.Len)
 
 		*subs = append(*subs, v)
 		p = v
@@ -156,10 +165,12 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 	}
 	poolSubs.Put(r.Subs)
 
-	for _, chain := range *r.Chains {
-		poolChain.Put(chain)
+	if r.Chains != nil {
+		for _, chain := range *r.Chains {
+			poolChain.Put(chain)
+		}
+		poolChains.Put(r.Chains)
 	}
-	poolChains.Put(r.Chains)
 
 	// yes, it might be nil for some failed in chaining
 	if r.AlignResults != nil {
@@ -205,6 +216,8 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 	co := &ChainingOptions{
 		MaxGap:   so.MaxGap,
 		MinScore: seedWeight(float64(so.MinSinglePrefix)),
+
+		MinDistance: float64(so.MinDistance),
 	}
 	idx.chainingOptions = co
 
@@ -226,6 +239,7 @@ type SearchOptions struct {
 	// basic
 	MinPrefix       uint8 // minimum prefix length, e.g, 15
 	MinSinglePrefix uint8 // minimum prefix length of the single seed, e.g, 20
+	MinDistance     int   // minimum distance between two seeds
 	TopN            int   // keep the topN scores
 
 	// chaining
@@ -236,6 +250,7 @@ type SearchOptions struct {
 var DefaultSearchOptions = SearchOptions{
 	MinPrefix:       15,
 	MinSinglePrefix: 20,
+	MinDistance:     5,
 	TopN:            10,
 
 	MaxGap: 5000,
@@ -272,6 +287,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	var code uint64
 	var K, _k int
 	var idIdx, pos, begin int
+	var rc bool
 	trees := idx.Trees
 	K = idx.K()
 	K8 := uint8(K)
@@ -315,8 +331,9 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				for _, refpos = range sr.Values {
 					idIdx = int(refpos >> 38)
 					pos = int(refpos << 26 >> 28)
+					rc = refpos&1 > 0
 
-					if refpos&1 > 0 {
+					if rc {
 						begin = pos + K - _k
 					} else {
 						begin = pos
@@ -327,6 +344,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 					_sub2.TBegin = begin
 					_sub2.Code = code
 					_sub2.Len = _k
+					_sub2.RC = rc
 
 					var r *SearchResult
 					if r, ok = (*m)[idIdx]; !ok {
@@ -364,16 +382,17 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	rs := poolSearchResults.Get().(*[]*SearchResult)
 	*rs = (*rs)[:0]
 
-	chainer := idx.poolChainers.Get().(*Chainer)
+	minSinglePrefix := int(idx.searchOptions.MinSinglePrefix)
 	for _, r := range *m {
 		r.CleanSubstrs() // remove duplicates
-		r.Chains, r.ChainingScore = chainer.Chain(r)
-		if r.ChainingScore < minChainingScore {
-			idx.RecycleSearchResult(r) // do not forget to recycle unused objects
+		if len(*r.Subs) == 1 && (*r.Subs)[0].Len < minSinglePrefix {
+			// do not forget to recycle filtered result
+			idx.RecycleSearchResult(r)
 			continue
 		}
 		*rs = append(*rs, r)
 	}
+
 	// sort subjects in descending order based on the score (simple statistics)
 	sorts.Quicksort(SearchResults(*rs))
 
@@ -386,11 +405,26 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		for i := topN; i < len(*rs); i++ {
 			r = (*rs)[i]
 
-			// do not forget to recycle all related objets
+			// do not forget to recycle filtered result
 			idx.RecycleSearchResult(r)
 		}
 		*rs = (*rs)[:topN]
 	}
+
+	chainer := idx.poolChainers.Get().(*Chainer)
+	j := 0
+	for _, r := range *rs {
+		r.Chains, r.ChainingScore = chainer.Chain(r)
+		if r.ChainingScore < minChainingScore {
+			idx.RecycleSearchResult(r) // do not forget to recycle unused objects
+			continue
+		} else {
+			(*rs)[j] = r
+			j++
+		}
+	}
+	*rs = (*rs)[:j]
+	idx.poolChainers.Put(chainer)
 
 	if !idx.saveTwoBit {
 		return rs, nil
@@ -403,7 +437,6 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	qlen := len(s)
 	var chain *[]int
 	var qs, qe, ts, te, tBegin, tEnd int
-	var rc bool
 	var tSeq *[]byte
 
 	rdr := <-idx.twobitReaders
@@ -424,23 +457,28 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			qe = sub.QBegin + sub.Len
 			te = sub.TBegin + sub.Len
 
-			if te < ts { // reverse complement
+			// if there's only one seed, need to check the strand information
+			if len(*r.Subs) == 1 {
+				rc = sub.RC
+			} else {
+				rc = ts > sub.TBegin
+			}
+
+			if rc { // reverse complement
 				tBegin = sub.TBegin - qlen + qe
 				if tBegin < 0 {
 					tBegin = 0
 				}
 				tEnd = ts + sub.Len + qs - 1
-				rc = true
-			} else { // if there's only one seed, need to check the strand information
+			} else {
 				tBegin = ts - qs
 				if tBegin < 0 {
 					tBegin = 0
 				}
 				tEnd = te + qlen - qe - 1
-				rc = false
 			}
 
-			// fmt.Printf("subject:%s:%d-%d\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1)
+			// fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
 
 			tSeq, err = rdr.SubSeq(r.IdIdx, tBegin, tEnd)
 			if err != nil {
