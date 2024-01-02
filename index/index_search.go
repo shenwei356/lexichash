@@ -43,8 +43,8 @@ type SubstrPair struct {
 }
 
 func (s SubstrPair) String() string {
-	return fmt.Sprintf("%d-%d vs %d-%d len:%d",
-		s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len, s.Len)
+	return fmt.Sprintf("%3d-%3d vs %3d-%3d len:%2d, rc:%v",
+		s.QBegin+1, s.QBegin+s.Len, s.TBegin+1, s.TBegin+s.Len, s.Len, s.RC)
 }
 
 var poolSub = &sync.Pool{New: func() interface{} {
@@ -223,6 +223,14 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 
 	idx.poolChainers = &sync.Pool{New: func() interface{} {
 		return NewChainer(co)
+	}}
+}
+
+// SetCompareOptions sets the alignment options
+func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
+	idx.compareOption = co
+	idx.poolSeqComparator = &sync.Pool{New: func() interface{} {
+		return NewSeqComparator(co)
 	}}
 }
 
@@ -414,7 +422,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	chainer := idx.poolChainers.Get().(*Chainer)
 	j := 0
 	for _, r := range *rs {
-		r.Chains, r.ChainingScore = chainer.Chain(r)
+		r.Chains, r.ChainingScore = chainer.Chain(r.Subs)
 		if r.ChainingScore < minChainingScore {
 			idx.RecycleSearchResult(r) // do not forget to recycle unused objects
 			continue
@@ -478,7 +486,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				tEnd = te + qlen - qe - 1
 			}
 
-			// fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
+			fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
 
 			tSeq, err = rdr.SubSeq(r.IdIdx, tBegin, tEnd)
 			if err != nil {
@@ -488,6 +496,10 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			if rc { // reverse complement
 				RC(*tSeq)
 			}
+
+			// fast filter with sketching comparison
+
+			// costly (pseudo-)alignment
 
 			ar := aligner.Global(s, *tSeq)
 			*ars = append(*ars, ar)

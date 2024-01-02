@@ -78,7 +78,7 @@ func TestChaining(t *testing.T) {
 
 	chainer := NewChainer(cf)
 	for _, r := range *rs {
-		paths, sumMaxScore := chainer.Chain(r)
+		paths, sumMaxScore := chainer.Chain(r.Subs)
 
 		t.Logf("sum score: %f, paths:\n", sumMaxScore)
 		for _, p := range *paths {

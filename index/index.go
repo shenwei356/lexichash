@@ -73,8 +73,14 @@ type Index struct {
 	chainingOptions *ChainingOptions
 	searchOptions   *SearchOptions
 	poolChainers    *sync.Pool
-	alignOptions    *align.AlignOptions
-	poolAligner     *sync.Pool
+
+	// for sequence comparing
+	compareOption     *SeqComparatorOptions
+	poolSeqComparator *sync.Pool
+
+	// for sequence alignment
+	alignOptions *align.AlignOptions
+	poolAligner  *sync.Pool
 }
 
 // NewIndex ceates a new Index.
