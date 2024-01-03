@@ -41,10 +41,15 @@ var DefaultSeqComparatorOptions = SeqComparatorOptions{
 	MinPrefix: 7,
 
 	Chaining2Options: Chaining2Options{
-		MaxGap:      32,
-		MinScore:    7,
-		MaxDistance: 100,
-		Band:        32,
+		// should be relative small
+		MaxGap: 32,
+		// should be the same as MinPrefix,
+		// cause the score fore a single seed pair is the length of the seed
+		MinScore: 5,
+		// can not be < k
+		MaxDistance: 50,
+		// can not be versy small
+		Band: 20,
 	},
 }
 
@@ -74,12 +79,12 @@ func (cpr *SeqComparator) Init(s []byte) error {
 
 	t := rtree.NewTree(k)
 
-	var kmer, kmerRC uint64
+	var kmer uint64 // , kmerRC
 	var ok bool
 	var js uint32
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, _, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
@@ -87,8 +92,8 @@ func (cpr *SeqComparator) Init(s []byte) error {
 		js = uint32(iter.Index()) << 2
 		t.Insert(kmer, js)
 
-		js |= 1
-		t.Insert(kmerRC, js)
+		// js |= 1
+		// t.Insert(kmerRC, js)
 	}
 
 	cpr.tree = t
@@ -111,7 +116,7 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	}
 
 	t := cpr.tree
-	var kmer, kmerRC, code uint64
+	var kmer, code uint64 // , kmerRC
 	var ok bool
 	var v uint32
 	var srs *[]*rtree.SearchResult
@@ -123,7 +128,7 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	*subs = (*subs)[:0]
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, _, ok, _ = iter.NextKmer()
 		if !ok {
 			break
 		}
@@ -139,10 +144,11 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 				_k = int(sr.LenPrefix)
 				rc = v&1 > 0
 				v >>= 2
+				_begin = j // for kmer
 				if rc {
-					_begin, begin = j+k-_k, int(v)+k-_k
+					begin = int(v) + k - _k
 				} else {
-					_begin, begin = j, int(v)
+					begin = int(v)
 				}
 				code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
 
@@ -158,33 +164,34 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 		}
 		t.RecycleSearchResult(srs)
 
-		srs, ok = t.Search(kmerRC, m)
-		if !ok {
-			continue
-		}
-		for _, sr = range *srs {
-			for _, v = range sr.Values {
-				_k = int(sr.LenPrefix)
-				rc = v&1 > 0
-				v >>= 2
-				if rc {
-					_begin, begin = j+k-_k, int(v)+k-_k
-				} else {
-					_begin, begin = j, int(v)
-				}
-				code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
+		// srs, ok = t.Search(kmerRC, m)
+		// if !ok {
+		// 	continue
+		// }
+		// for _, sr = range *srs {
+		// 	for _, v = range sr.Values {
+		// 		_k = int(sr.LenPrefix)
+		// 		rc = v&1 > 0
+		// 		v >>= 2
+		// 		_begin = j + k - _k // for kmerRC
+		// 		if rc {
+		// 			begin = int(v) + k - _k
+		// 		} else {
+		// 			begin = int(v)
+		// 		}
+		// 		code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
 
-				_sub2 := poolSub.Get().(*SubstrPair)
-				_sub2.QBegin = _begin
-				_sub2.TBegin = begin
-				_sub2.Code = code
-				_sub2.Len = _k
-				_sub2.RC = rc
+		// 		_sub2 := poolSub.Get().(*SubstrPair)
+		// 		_sub2.QBegin = _begin
+		// 		_sub2.TBegin = begin
+		// 		_sub2.Code = code
+		// 		_sub2.Len = _k
+		// 		_sub2.RC = rc
 
-				*subs = append(*subs, _sub2)
-			}
-		}
-		t.RecycleSearchResult(srs)
+		// 		*subs = append(*subs, _sub2)
+		// 	}
+		// }
+		// t.RecycleSearchResult(srs)
 	}
 
 	// --------------------------------------------------------------
@@ -214,16 +221,13 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 			*markers = append(*markers, false)
 		}
 		for i, v := range (*subs)[1:] {
-			// fmt.Printf("%d: %s\n", i+1, v)
 			vQEnd = v.QBegin + v.Len
 			upbound = vQEnd - k
 			vTEnd = v.TBegin + v.Len
 			j = i
 			for j >= 0 {
 				p = (*subs)[j]
-				// fmt.Printf("  %d: %s\n", j, p)
 				if p.QBegin < upbound {
-					// fmt.Printf("  stop continue\n")
 					break
 				}
 
@@ -231,7 +235,6 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 				if vQEnd <= p.QBegin+p.Len &&
 					v.TBegin >= p.TBegin && vTEnd <= p.TBegin+p.Len {
 					poolSub.Put(v) // do not forget to recycle the object
-					// fmt.Printf("  xx %s is embedded in %s\n", v, p)
 					(*markers)[i+1] = true
 					break
 				}
@@ -249,19 +252,25 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 		poolSubs.Put(subs)
 	}
 
-	for _, sub := range *subs2 {
-		fmt.Printf("%s\n", sub)
-	}
-	fmt.Println("-------------------------------")
+	// fmt.Println("----------- cleaned anchors ----------")
+	// for _, sub := range *subs2 {
+	// 	fmt.Printf("%s\n", sub)
+	// }
+	// fmt.Println("-------------------------------")
 
 	// --------------------------------------------------------------
 	// chaining paired substrings
 
-	chains, chainingScore := cpr.chainer.Chain(subs2)
-	if chainingScore < cpr.options.Chaining2Options.MinScore {
+	chains := cpr.chainer.Chain(subs2)
+	if len(*chains) == 0 {
 		RecycleChainingResult(chains)
 		return 0, nil
 	}
+
+	// --------------------------------------------------------------
+	// compute similarity
+
+	var matches = 0
 
 	var i int
 	var sub *SubstrPair
@@ -270,15 +279,6 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 			sub = (*subs2)[i]
 			fmt.Printf("chain: %d, %s\n", c, sub)
 		}
-	}
-
-	// --------------------------------------------------------------
-	// compute similarity
-
-	var matches = 0
-	for _, s := range *subs2 {
-		matches += s.Len
-		// fmt.Printf("%s\n", s)
 	}
 
 	var ident float64
