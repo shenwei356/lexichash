@@ -115,6 +115,9 @@ type SeqComparatorResult struct {
 	MatchedBases int // The number of matched bases.
 	AlignedBases int // The number of aligned bases.
 	NumChains    int // The number of chains
+
+	AlignedFraction float64 // aligned fraction, percentage
+	Identity        float64 // identity (fraction of same bases), percentage
 }
 
 var poolSeqComparatorResult = &sync.Pool{New: func() interface{} {
@@ -153,8 +156,13 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	subs := poolSubs.Get().(*[]*SubstrPair)
 	*subs = (*subs)[:0]
 
+	// only considering k-mers on the positive strand.
+	// how can we detect inversion?
+	//	-----> <====== ----->
+	//	||||||         ||||||
+	//	-----> ======> ----->
 	for {
-		kmer, ok, _ = iter.NextPositiveKmer() // only considering
+		kmer, ok, _ = iter.NextPositiveKmer()
 		if !ok {
 			break
 		}
@@ -181,9 +189,6 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	if len(*subs) < 1 { // no way, only one match?
 		return nil, err
 	}
-
-	// result object
-	r := poolSeqComparatorResult.Get().(*SeqComparatorResult)
 
 	// --------------------------------------------------------------
 	// clear matched substrings
@@ -262,12 +267,20 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	// 		fmt.Printf("chain: %d, %s\n", c, sub)
 	// 	}
 	// }
-	// fmt.Printf("%d, %d/%d)\n", len(s), nMatchedBases, nAlignedBases)
+	// fmt.Printf("%d, (%d/%d)\n", len(s), nMatchedBases, nAlignedBases)
 
-	RecycleChainingResult(chains)
+	// result object
+	r := poolSeqComparatorResult.Get().(*SeqComparatorResult)
 	r.AlignedBases = nAlignedBases
 	r.MatchedBases = nMatchedBases
 	r.NumChains = len(*chains)
+	r.Identity = float64(nMatchedBases) / float64(nAlignedBases) * 100
+	r.AlignedFraction = float64(nAlignedBases) / float64(cpr.len) * 100
+	if r.AlignedFraction > 100 {
+		r.AlignedFraction = 100
+	}
+
+	RecycleChainingResult(chains)
 	return r, nil
 }
 

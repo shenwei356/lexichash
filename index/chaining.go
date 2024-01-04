@@ -29,16 +29,12 @@ import (
 type ChainingOptions struct {
 	MaxGap   float64
 	MinScore float64
-
-	MinDistance float64 // minimum distance between two seeds
 }
 
 // DefaultChainingOptions is the defalt vaule of ChainingOption.
 var DefaultChainingOptions = ChainingOptions{
 	MaxGap:   5000,
 	MinScore: 40,
-
-	MinDistance: 5,
 }
 
 // Chainer is an object for chaining the lexichash substrings between query and reference sequences.
@@ -138,7 +134,7 @@ func (ce *Chainer) Chain(subs *[]*SubstrPair) (*[]*[]int, float64) {
 	var s, m, d, g float64
 	var a, b *SubstrPair
 	maxGap := ce.options.MaxGap
-	minDistance := ce.options.MinDistance
+	// minDistance := ce.options.MinDistance
 	for i = 1; i < n; i++ {
 		j0 = i * (i + 1) >> 1
 
@@ -152,9 +148,9 @@ func (ce *Chainer) Chain(subs *[]*SubstrPair) (*[]*[]int, float64) {
 			a, b = (*subs)[i], (*subs)[j]
 
 			d = distance(a, b)
-			if d < minDistance {
-				continue
-			}
+			// if d < minDistance { // looks like we can not do this.
+			// 	continue
+			// }
 
 			g = gap(a, b)
 			if g > maxGap {

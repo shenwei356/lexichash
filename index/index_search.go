@@ -30,15 +30,83 @@ import (
 	"github.com/twotwotwo/sorts"
 )
 
-// SubstrPair represents a pair of found substrings/seeds.
+// SearchOptions defineds options used in searching.
+type SearchOptions struct {
+	// basic
+	MinPrefix       uint8 // minimum prefix length, e.g, 15
+	MinSinglePrefix uint8 // minimum prefix length of the single seed, e.g, 20
+	TopN            int   // keep the topN scores
+
+	// chaining
+	MaxGap float64
+
+	// seq similarity
+	MinAlignedFraction float64 // percentage
+	MinIdentity        float64 // percentage
+}
+
+// DefaultSearchOptions contains default option values.
+var DefaultSearchOptions = SearchOptions{
+	MinPrefix:       15,
+	MinSinglePrefix: 20,
+	TopN:            10,
+
+	MaxGap: 5000,
+
+	MinAlignedFraction: 70,
+	MinIdentity:        70,
+}
+
+// SetChainingOptions replaces the default chaining option with a new one.
+// func (idx *Index) SetChainingOptions(co *ChainingOptions) {
+// 	idx.chainingOptions = co
+// 	idx.poolChainers = &sync.Pool{New: func() interface{} {
+// 		return NewChainer(co)
+// 	}}
+// }
+
+// SetSearchingOptions sets the searching options.
+// Note that it overwrites the result of SetChainingOption.
+func (idx *Index) SetSearchingOptions(so *SearchOptions) {
+	idx.searchOptions = so
+
+	co := &ChainingOptions{
+		MaxGap:   so.MaxGap,
+		MinScore: seedWeight(float64(so.MinSinglePrefix)),
+	}
+	idx.chainingOptions = co
+
+	idx.poolChainers = &sync.Pool{New: func() interface{} {
+		return NewChainer(co)
+	}}
+}
+
+// SetAlignOptions sets the alignment options
+// func (idx *Index) SetAlignOptions(ao *align.AlignOptions) {
+// 	idx.alignOptions = ao
+// 	idx.poolAligner = &sync.Pool{New: func() interface{} {
+// 		return align.NewAligner(ao)
+// 	}}
+// }
+
+// SetCompareOptions sets the sequence comparing options
+func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
+	idx.compareOption = co
+	idx.poolSeqComparator = &sync.Pool{New: func() interface{} {
+		return NewSeqComparator(co)
+	}}
+}
+
+// --------------------------------------------------------------------------
+
+// SubstrPair represents a pair of found substrings/seeds, it's also called an anchor.
 type SubstrPair struct {
 	QBegin int    // start position of the substring (0-based) in query
 	TBegin int    // start position of the substring (0-based) in reference
 	Len    int    // length
-	Code   uint64 // k-mer
+	Code   uint64 // k-mer, only for debugging
 
-	// are the substring from reference seq is on the negative strand.
-	RC bool
+	RC bool // is the substring from the reference seq on the negative strand.
 }
 
 func (s SubstrPair) String() string {
@@ -214,70 +282,6 @@ var poolSearchResultsMap = &sync.Pool{New: func() interface{} {
 	return &m
 }}
 
-// SetChainingOptions replaces the default chaining option with a new one.
-func (idx *Index) SetChainingOptions(co *ChainingOptions) {
-	idx.chainingOptions = co
-	idx.poolChainers = &sync.Pool{New: func() interface{} {
-		return NewChainer(co)
-	}}
-}
-
-// SetSearchingOptions sets the searching options.
-// Note that it overwrites the result of SetChainingOption.
-func (idx *Index) SetSearchingOptions(so *SearchOptions) {
-	idx.searchOptions = so
-
-	co := &ChainingOptions{
-		MaxGap:   so.MaxGap,
-		MinScore: seedWeight(float64(so.MinSinglePrefix)),
-
-		MinDistance: float64(so.MinDistance),
-	}
-	idx.chainingOptions = co
-
-	idx.poolChainers = &sync.Pool{New: func() interface{} {
-		return NewChainer(co)
-	}}
-}
-
-// SetCompareOptions sets the sequence comparing options
-func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
-	idx.compareOption = co
-	idx.poolSeqComparator = &sync.Pool{New: func() interface{} {
-		return NewSeqComparator(co)
-	}}
-}
-
-// SetAlignOptions sets the alignment options
-// func (idx *Index) SetAlignOptions(ao *align.AlignOptions) {
-// 	idx.alignOptions = ao
-// 	idx.poolAligner = &sync.Pool{New: func() interface{} {
-// 		return align.NewAligner(ao)
-// 	}}
-// }
-
-// SearchOptions defineds options used in searching.
-type SearchOptions struct {
-	// basic
-	MinPrefix       uint8 // minimum prefix length, e.g, 15
-	MinSinglePrefix uint8 // minimum prefix length of the single seed, e.g, 20
-	MinDistance     int   // minimum distance between two seeds
-	TopN            int   // keep the topN scores
-
-	// chaining
-	MaxGap float64
-}
-
-// DefaultSearchOptions contains default option values.
-var DefaultSearchOptions = SearchOptions{
-	MinPrefix:       15,
-	MinSinglePrefix: 20,
-	MinDistance:     5,
-	TopN:            10,
-
-	MaxGap: 5000,
-}
-
 // Search queries the index with a sequence.
 // After using the result, do not forget to call RecycleSearchResult().
 func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
@@ -428,7 +432,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		for i := topN; i < len(*rs); i++ {
 			r = (*rs)[i]
 
-			// do not forget to recycle filtered result
+			// do not forget to recycle the filtered result
 			idx.RecycleSearchResult(r)
 		}
 		*rs = (*rs)[:topN]
@@ -454,7 +458,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	}
 
 	// ----------------------------------------------------------------
-	// alignment
+	// sequence similarity
 
 	var sub *SubstrPair
 	qlen := len(s)
@@ -466,19 +470,24 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	// aligner := idx.poolAligner.Get().(*align.Aligner)
 	cpr := idx.poolSeqComparator.Get().(*SeqComparator)
-	err = cpr.Index(s)
+	err = cpr.Index(s) // index the query sequence
 	if err != nil {
 		return nil, err
 	}
 
+	minAF := idx.searchOptions.MinAlignedFraction
+	minIdent := idx.searchOptions.MinIdentity
+
+	// check all references
 	for _, r := range *rs {
 		// ars := poolAlignResults.Get().(*[]*align.AlignResult)
 		// *ars = (*ars)[:0]
 		crs := poolSeqComparatorResults.Get().(*[]*SeqComparatorResult)
 		*crs = (*crs)[:0]
 
+		// check sequences from all chains
 		for _, chain = range *r.Chains {
-			// first seed pair
+			// the first seed pair
 			sub = (*r.Subs)[(*chain)[0]]
 			qs = sub.QBegin
 			ts = sub.TBegin
@@ -488,13 +497,13 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			qe = sub.QBegin + sub.Len
 			te = sub.TBegin + sub.Len
 
-			// if there's only one seed, need to check the strand information
-			if len(*r.Subs) == 1 {
+			if len(*r.Subs) == 1 { // if there's only one seed, need to check the strand information
 				rc = sub.RC
-			} else {
+			} else { // check the strand according to coordinates of seeds
 				rc = ts > sub.TBegin
 			}
 
+			// estimate the location of target sequence on the reference
 			if rc { // reverse complement
 				tBegin = sub.TBegin - qlen + qe
 				if tBegin < 0 {
@@ -509,8 +518,11 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				tEnd = te + qlen - qe - 1
 			}
 
-			// fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
+			fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
 
+			// extract target sequence for comparison.
+			// Right now, we fetch seq from disk for each seq,
+			// Later, we'll buffer frequently accessed references for improving speed.
 			tSeq, err = rdr.SubSeq(r.IdIdx, tBegin, tEnd)
 			if err != nil {
 				return rs, err
@@ -531,7 +543,16 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			if err != nil {
 				return nil, err
 			}
-			*crs = append(*crs, cr)
+			if cr == nil {
+				twobit.RecycleTwoBit(tSeq)
+				continue
+			}
+
+			if cr.AlignedFraction >= minAF && cr.Identity >= minIdent {
+				*crs = append(*crs, cr)
+			} else {
+				*crs = append(*crs, nil)
+			}
 
 			twobit.RecycleTwoBit(tSeq)
 		}
