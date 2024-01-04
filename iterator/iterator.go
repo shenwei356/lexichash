@@ -141,6 +141,43 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	return code, codeRC, true, nil
 }
 
+// NextPositiveKmer returns next the code of k-mer on the positive strand.
+func (iter *Iterator) NextPositiveKmer() (code uint64, ok bool, err error) {
+	if iter.finished {
+		return 0, false, nil
+	}
+
+	if iter.idx == iter.end { // recycle the Iterator
+		iter.finished = true
+		poolIterator.Put(iter)
+		return 0, false, nil
+	}
+
+	iter.e = iter.idx + iter.k
+	iter.kmer = iter.s[iter.idx:iter.e]
+
+	if !iter.first {
+		iter.codeBase = base2bit[iter.kmer[iter.kP1]]
+		if iter.codeBase == 4 {
+			err = ErrIllegalBase
+		}
+
+		// compute code from previous one
+		code = (iter.preCode&iter.mask1)<<2 | iter.codeBase
+	} else {
+		code, err = kmers.Encode(iter.kmer)
+		iter.first = false
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("encode %s: %s", iter.kmer, err)
+	}
+
+	iter.preCode = code
+	iter.idx++
+
+	return code, true, nil
+}
+
 // Index returns current 0-baesd index.
 func (iter *Iterator) Index() int {
 	return iter.idx - 1

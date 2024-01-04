@@ -28,6 +28,7 @@ import (
 	"github.com/shenwei356/lexichash/iterator"
 )
 
+// SeqComparatorOptions contains options for comparing two sequences.
 type SeqComparatorOptions struct {
 	K         uint8
 	MinPrefix uint8
@@ -35,6 +36,7 @@ type SeqComparatorOptions struct {
 	Chaining2Options
 }
 
+// DefaultSeqComparatorOptions contains the default options for SeqComparatorOptions.
 var DefaultSeqComparatorOptions = SeqComparatorOptions{
 	K:         32,
 	MinPrefix: 7,
@@ -43,23 +45,31 @@ var DefaultSeqComparatorOptions = SeqComparatorOptions{
 		// should be relative small
 		MaxGap: 32,
 		// should be the same as MinPrefix,
-		// cause the score fore a single seed pair is the length of the seed
+		// cause the score for a single seed pair is the length of the seed.
 		MinScore: 5,
 		// can not be < k
 		MaxDistance: 50,
-		// can not be versy small
+		// can not be two small
 		Band: 20,
 	},
 }
 
+// SeqComparator is for fast and accurate similarity estimation of two sequences,
+// which are in the same strand (important).
 type SeqComparator struct {
+	// options
 	options *SeqComparatorOptions
+	// chainer for chaining anchors,
+	// shared variable-length substrings searched by prefix matching.
 	chainer *Chainer2
 
-	tree *rtree.Tree // prefix tree for k-mers
+	// a prefix tree for matching k-mers
+	tree *rtree.Tree
 	len  int
 }
 
+// NewSeqComparator creates a new SeqComparator with given options.
+// No options checking now.
 func NewSeqComparator(options *SeqComparatorOptions) *SeqComparator {
 	cpr := &SeqComparator{
 		options: options,
@@ -68,31 +78,30 @@ func NewSeqComparator(options *SeqComparatorOptions) *SeqComparator {
 	return cpr
 }
 
-func (cpr *SeqComparator) Init(s []byte) error {
+// Index initializes the SeqComparator with a sequence.
+func (cpr *SeqComparator) Index(s []byte) error {
 	k := cpr.options.K
 
+	// k-mer iterator
 	iter, err := iterator.NewKmerIterator(s, int(k))
 	if err != nil {
 		return err
 	}
 
+	// a reusable Radix tree for searching k-mers sharing at least n-base prefixes.
 	t := rtree.NewTree(k)
 
-	var kmer uint64 // , kmerRC
+	// only considering the positive strand
+	var kmer uint64
 	var ok bool
-	var js uint32
 
 	for {
-		kmer, _, ok, _ = iter.NextKmer()
+		kmer, ok, _ = iter.NextPositiveKmer()
 		if !ok {
 			break
 		}
 
-		js = uint32(iter.Index()) << 2
-		t.Insert(kmer, js)
-
-		// js |= 1
-		// t.Insert(kmerRC, js)
+		t.Insert(kmer, uint32(iter.Index()))
 	}
 
 	cpr.tree = t
@@ -101,7 +110,26 @@ func (cpr *SeqComparator) Init(s []byte) error {
 	return nil
 }
 
-func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
+// SeqComparatorResult contains the details of a seq comparison result.
+type SeqComparatorResult struct {
+	MatchedBases int // The number of matched bases.
+	AlignedBases int // The number of aligned bases.
+	NumChains    int // The number of chains
+}
+
+var poolSeqComparatorResult = &sync.Pool{New: func() interface{} {
+	return &SeqComparatorResult{}
+}}
+
+// RecycleSeqComparatorResult recycles a SeqComparatorResult
+func RecycleSeqComparatorResult(r *SeqComparatorResult) {
+	poolSeqComparatorResult.Put(r)
+}
+
+// Compare matchs k-mers for the query sequence, chains them up,
+// and computes the similarity.
+// Please remember to call RecycleSeqComparatorResult() to recycle the result.
+func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	k8 := cpr.options.K
 	k := int(k8)
 	m := cpr.options.MinPrefix
@@ -111,28 +139,25 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 
 	iter, err := iterator.NewKmerIterator(s, k)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	t := cpr.tree
-	var kmer, code uint64 // , kmerRC
+	var kmer uint64
 	var ok bool
 	var v uint32
 	var srs *[]*rtree.SearchResult
 	var sr *rtree.SearchResult
-	var rc bool
-	var j, _k, _begin, begin int
 
+	// substring pairs/seeds/anchors
 	subs := poolSubs.Get().(*[]*SubstrPair)
 	*subs = (*subs)[:0]
 
 	for {
-		kmer, _, ok, _ = iter.NextKmer()
+		kmer, ok, _ = iter.NextPositiveKmer() // only considering
 		if !ok {
 			break
 		}
-
-		j = iter.Index()
 
 		srs, ok = t.Search(kmer, m)
 		if !ok {
@@ -140,62 +165,25 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 		}
 		for _, sr = range *srs {
 			for _, v = range sr.Values {
-				_k = int(sr.LenPrefix)
-				rc = v&1 > 0
-				v >>= 2
-				_begin = j // for kmer
-				if rc {
-					begin = int(v) + k - _k
-				} else {
-					begin = int(v)
-				}
-				code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
-
 				_sub2 := poolSub.Get().(*SubstrPair)
-				_sub2.QBegin = _begin
-				_sub2.TBegin = begin
-				_sub2.Code = code
-				_sub2.Len = _k
-				_sub2.RC = rc
+				_sub2.QBegin = iter.Index()
+				_sub2.TBegin = int(v)
+				_sub2.Code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
+				_sub2.Len = int(sr.LenPrefix)
+				_sub2.RC = false
 
 				*subs = append(*subs, _sub2)
 			}
 		}
 		t.RecycleSearchResult(srs)
-
-		// srs, ok = t.Search(kmerRC, m)
-		// if !ok {
-		// 	continue
-		// }
-		// for _, sr = range *srs {
-		// 	for _, v = range sr.Values {
-		// 		_k = int(sr.LenPrefix)
-		// 		rc = v&1 > 0
-		// 		v >>= 2
-		// 		_begin = j + k - _k // for kmerRC
-		// 		if rc {
-		// 			begin = int(v) + k - _k
-		// 		} else {
-		// 			begin = int(v)
-		// 		}
-		// 		code = rtree.KmerPrefix(sr.Kmer, k8, sr.LenPrefix)
-
-		// 		_sub2 := poolSub.Get().(*SubstrPair)
-		// 		_sub2.QBegin = _begin
-		// 		_sub2.TBegin = begin
-		// 		_sub2.Code = code
-		// 		_sub2.Len = _k
-		// 		_sub2.RC = rc
-
-		// 		*subs = append(*subs, _sub2)
-		// 	}
-		// }
-		// t.RecycleSearchResult(srs)
 	}
 
 	if len(*subs) < 1 { // no way, only one match?
-		return 0, err
+		return nil, err
 	}
+
+	// result object
+	r := poolSeqComparatorResult.Get().(*SeqComparatorResult)
 
 	// --------------------------------------------------------------
 	// clear matched substrings
@@ -214,6 +202,7 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 
 	var p *SubstrPair
 	var upbound, vQEnd, vTEnd int
+	var j int
 	markers := poolBoolList.Get().(*[]bool)
 	*markers = (*markers)[:0]
 	for range *subs {
@@ -262,7 +251,7 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	chains, nMatchedBases, nAlignedBases := cpr.chainer.Chain(subs2)
 	if len(*chains) == 0 {
 		RecycleChainingResult(chains)
-		return 0, nil
+		return nil, nil
 	}
 
 	// var i int
@@ -273,12 +262,13 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	// 		fmt.Printf("chain: %d, %s\n", c, sub)
 	// 	}
 	// }
-	// fmt.Printf("%f (%d/%d)\n", ident, nMatchedBases, nAlignedBases)
-
-	ident := float64(nMatchedBases) / float64(nAlignedBases)
+	// fmt.Printf("%d, %d/%d)\n", len(s), nMatchedBases, nAlignedBases)
 
 	RecycleChainingResult(chains)
-	return ident, nil
+	r.AlignedBases = nAlignedBases
+	r.MatchedBases = nMatchedBases
+	r.NumChains = len(*chains)
+	return r, nil
 }
 
 var poolBoolList = &sync.Pool{New: func() interface{} {

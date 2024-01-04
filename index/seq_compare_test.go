@@ -69,18 +69,19 @@ func TestSeqCompare(t *testing.T) {
 
 	cpr := NewSeqComparator(&DefaultSeqComparatorOptions)
 
-	err := cpr.Init(s1)
+	err := cpr.Index(s1)
 	if err != nil {
 		t.Logf("%s", err)
 		return
 	}
 
-	ident, err := cpr.Compare(s2)
+	cr, err := cpr.Compare(s2)
 	if err != nil {
 		t.Logf("%s", err)
 		return
 	}
-	t.Logf("%f\n", ident)
+	t.Logf("nChains: %d, matched bases: %d, aligned bases: %d\n", cr.NumChains, cr.MatchedBases, cr.AlignedBases)
+	RecycleSeqComparatorResult(cr)
 }
 
 //

@@ -94,7 +94,7 @@ var poolChain2 = &sync.Pool{New: func() interface{} {
 // Chain finds the possible chain paths.
 // Please remember to call RecycleChainingResult after using the results.
 // Returned results:
-//  1. Paths,
+//  1. Paths.
 //  2. The number of matched bases.
 //  3. The number of aligned bases.
 func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
@@ -338,7 +338,7 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
 			//
 			sub = (*subs)[i]
 			overlapped = false
-			nb = len(bounds) / 4
+			nb = len(bounds) >> 2 // len(bounds) / 4
 			for bi = 0; bi < nb; bi++ {
 				bj = bi << 2
 				if !((sub.QBegin > bounds[bj+1] && sub.TBegin > bounds[bj+3]) || // top right

@@ -25,7 +25,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/shenwei356/lexichash/index/align"
 	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/twotwotwo/sorts"
@@ -56,8 +55,13 @@ var poolSubs = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
-var poolAlignResults = &sync.Pool{New: func() interface{} {
-	tmp := make([]*align.AlignResult, 0, 8)
+// var poolAlignResults = &sync.Pool{New: func() interface{} {
+// 	tmp := make([]*align.AlignResult, 0, 8)
+// 	return &tmp
+// }}
+
+var poolSeqComparatorResults = &sync.Pool{New: func() interface{} {
+	tmp := make([]*SeqComparatorResult, 0, 8)
 	return &tmp
 }}
 
@@ -80,7 +84,7 @@ type SearchResult struct {
 
 	// more about the alignment detail
 	// AlignResults *[]*align.AlignResult
-	Identities []float64 // sequence comparing
+	SeqComparatorResults *[]*SeqComparatorResult // sequence comparing
 }
 
 func (r SearchResult) String() string {
@@ -93,7 +97,7 @@ func (r *SearchResult) Reset() {
 	r.ChainingScore = 0
 	r.Chains = nil
 	// r.AlignResults = nil
-	r.Identities = r.Identities[:0]
+	r.SeqComparatorResults = nil
 }
 
 // SearchResults represents a list of search results from multiple reference genomes.
@@ -182,6 +186,13 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 	// 	}
 	// 	poolAlignResults.Put(r.AlignResults)
 	// }
+
+	if r.SeqComparatorResults != nil {
+		for _, cr := range *r.SeqComparatorResults {
+			RecycleSeqComparatorResult(cr)
+		}
+		poolSeqComparatorResults.Put(r.SeqComparatorResults)
+	}
 
 	poolSearchResult.Put(r)
 }
@@ -368,7 +379,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 						r.ChainingScore = 0
 						r.Chains = nil // important
 						// r.AlignResults = nil // important
-						r.Identities = r.Identities[:0]
+						r.SeqComparatorResults = nil // important
 
 						(*m)[idIdx] = r
 					}
@@ -455,15 +466,17 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	// aligner := idx.poolAligner.Get().(*align.Aligner)
 	cpr := idx.poolSeqComparator.Get().(*SeqComparator)
-	err = cpr.Init(s)
+	err = cpr.Index(s)
 	if err != nil {
 		return nil, err
 	}
 
-	var ident float64
 	for _, r := range *rs {
-		ars := poolAlignResults.Get().(*[]*align.AlignResult)
-		*ars = (*ars)[:0]
+		// ars := poolAlignResults.Get().(*[]*align.AlignResult)
+		// *ars = (*ars)[:0]
+		crs := poolSeqComparatorResults.Get().(*[]*SeqComparatorResult)
+		*crs = (*crs)[:0]
+
 		for _, chain = range *r.Chains {
 			// first seed pair
 			sub = (*r.Subs)[(*chain)[0]]
@@ -514,15 +527,16 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			// ar := aligner.Global(s, *tSeq)
 			// *ars = append(*ars, ar)
 
-			ident, err = cpr.Compare(*tSeq)
+			cr, err := cpr.Compare(*tSeq)
 			if err != nil {
 				return nil, err
 			}
-			r.Identities = append(r.Identities, ident)
+			*crs = append(*crs, cr)
 
 			twobit.RecycleTwoBit(tSeq)
 		}
 		// r.AlignResults = ars
+		r.SeqComparatorResults = crs
 	}
 
 	// idx.poolAligner.Put(aligner)

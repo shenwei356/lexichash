@@ -33,6 +33,7 @@ type leafNode struct {
 	val []uint32 // yes, multiple values
 }
 
+// Reset resets the leafNode object.
 func (n *leafNode) Reset() {
 	n.val = n.val[:0]
 }
@@ -48,6 +49,7 @@ type node struct {
 	leaf *leafNode // optional
 }
 
+// Reset resets the node object.
 func (n *node) Reset() {
 	n.numChildren = 0
 	for i := 0; i < 4; i++ {
@@ -84,11 +86,13 @@ func NewTree(k uint8) *Tree {
 	return t
 }
 
+// RecycleTree recycles the tree object.
 func RecycleTree(t *Tree) {
 	recursiveRecycle(t.root, t.k)
 	poolTree.Put(t)
 }
 
+// recursiveRecycle recycle all nodes, including leaf nodes.
 func recursiveRecycle(n *node, k uint8) {
 	if n.leaf != nil {
 		poolLeafNode.Put(n.leaf)
