@@ -24,7 +24,7 @@ import (
 	"sync"
 )
 
-// ChainingOptions contains all options in chaining.
+// Chaining2Options contains all options in chaining.
 type Chaining2Options struct {
 	MaxGap   int
 	MinScore int
@@ -34,7 +34,7 @@ type Chaining2Options struct {
 	Band        int // only check i in range of  i − A < j < i
 }
 
-// DefaultChainingOptions is the defalt vaule of ChainingOption.
+// DefaultChaining2Options is the defalt vaule of Chaining2Option.
 var DefaultChaining2Options = Chaining2Options{
 	MaxGap:   32,
 	MinScore: 7,
@@ -43,9 +43,11 @@ var DefaultChaining2Options = Chaining2Options{
 	Band:        20,
 }
 
-// Chainer is an object for chaining the seeds.
-// Some variables like the score tables are re-used,
-// so it could help to reduce GC load.
+// Chainer2 is an object for chaining the anchors in two similar sequences.
+// Different from Chainer, Chainer2 find chains with no overlaps.
+// Anchors/seeds/substrings in Chainer2 is denser than those in Chainer,
+// and the chaining score function is also much simpler, only considering
+// the lengths of anchors and gaps between them.
 type Chainer2 struct {
 	options *Chaining2Options
 
@@ -70,7 +72,7 @@ func NewChainer2(options *Chaining2Options) *Chainer2 {
 	return c
 }
 
-// RecycleChainingResult reycles the chaining results.
+// RecycleChainingResult reycles the chaining paths.
 // Please remember to call this after using the results.
 func RecycleChaining2Result(chains *[]*[]int) {
 	for _, chain := range *chains {
@@ -89,30 +91,36 @@ var poolChain2 = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
-// Chain finds the possible seed paths.
+// Chain finds the possible chain paths.
 // Please remember to call RecycleChainingResult after using the results.
-func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
+// Returned results:
+//  1. Paths,
+//  2. The number of matched bases.
+//  3. The number of aligned bases.
+func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
 	n := len(*subs)
 
 	if n == 1 { // for one seed, just check the seed weight
 		paths := poolChains2.Get().(*[]*[]int)
 		*paths = (*paths)[:0]
 
-		w := (*subs)[0].Len
-		if w >= ce.options.MinScore {
+		sub := (*subs)[0]
+		if sub.Len >= ce.options.MinScore { // the length of anchor
 			path := poolChain2.Get().(*[]int)
 			*path = (*path)[:0]
 
 			*path = append(*path, 0)
 
 			*paths = append(*paths, path)
+
+			return paths, sub.Len, sub.Len
 		}
 
-		return paths
+		return paths, 0, 0
 	}
 
 	var i, _b, j, k int
-	band := ce.options.Band
+	band := ce.options.Band // band size of banded-DP
 
 	// a list for storing score matrix, the size is band * len(seeds pair)
 	// scores := ce.scores[:0]
@@ -120,6 +128,8 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 	// for k = 0; k < size; k++ {
 	// 	scores = append(scores, 0)
 	// }
+
+	// reused objects
 
 	// the maximum score for each seed, the size is n
 	maxscores := ce.maxscores[:0]
@@ -206,11 +216,12 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 
 	// backtrack
 
-	var first bool
+	var firstAnchorOfAChain bool
 	minScore := ce.options.MinScore
 
 	paths := poolChains.Get().(*[]*[]int)
 	*paths = (*paths)[:0]
+	var nMatchedBases, nAlignedBases int
 
 	// ---------------- the chain with the highest score  -----------------
 
@@ -218,22 +229,32 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 	*path = (*path)[:0]
 
 	i = Mi
-	first = true
+	firstAnchorOfAChain = true
 	var qb, qe, tb, te int // the bound
 	var sub *SubstrPair = (*subs)[i]
 	qe, te = sub.QBegin+sub.Len, sub.TBegin+sub.Len // end
+	var beginOfNextAnchor int                       // for counting matched bases
 	for {
-		if first && maxscores[i] < minScore { // the highest score is not good enough
-			return paths // an empty path
+		if firstAnchorOfAChain && maxscores[i] < minScore { // the highest score is not good enough
+			return paths, 0, 0 // an empty path
 		}
 
 		j = maxscoresIdxs[i] // previous seed
 
 		*path = append(*path, i) // record the seed
 		visited[i] = true        // mark as visited
-		if first {
-			first = false
+		sub = (*subs)[i]
+		if firstAnchorOfAChain {
+			firstAnchorOfAChain = false
+			nMatchedBases += sub.Len
+		} else {
+			if sub.QBegin+sub.Len >= beginOfNextAnchor {
+				nMatchedBases += beginOfNextAnchor - sub.QBegin
+			} else {
+				nMatchedBases += sub.Len
+			}
 		}
+		beginOfNextAnchor = sub.QBegin
 
 		if i == j { // the path starts here
 			break
@@ -254,15 +275,16 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 	bounds = append(bounds, qe)
 	bounds = append(bounds, tb)
 	bounds = append(bounds, te)
+	nAlignedBases += qe - qb + 1
 	// fmt.Printf("new bound: (%d, %d) vs (%d, %d)\n", qb, qe, tb, te)
 
-	// ---------------- other chains -----------------
+	// ------------------------- other chains ----------------------------
 
 	path = poolChain.Get().(*[]int)
 	*path = (*path)[:0]
 
-	i = n - 1 // the bigest unvisited i
-	first = true
+	i = n - 1 // the biggest unvisited i
+	firstAnchorOfAChain = true
 	var overlapped bool
 	var biggestUnvisitedI int
 	var computeBiggestUnvisitedI bool
@@ -334,13 +356,24 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 
 			// fmt.Printf("  add %d (%s)\n", i, *sub)
 			*path = append(*path, i) // record the seed
-			if first {
+			sub = (*subs)[i]
+			if firstAnchorOfAChain {
+				firstAnchorOfAChain = false
+
 				qe, te = sub.QBegin+sub.Len, sub.TBegin+sub.Len // end
 				qb, tb = sub.QBegin, sub.TBegin                 // begin
-				first = false
+
+				nMatchedBases += sub.Len
 			} else {
 				qb, tb = sub.QBegin, sub.TBegin // begin
+
+				if sub.QBegin+sub.Len >= beginOfNextAnchor {
+					nMatchedBases += beginOfNextAnchor - sub.QBegin
+				} else {
+					nMatchedBases += sub.Len
+				}
 			}
+			beginOfNextAnchor = sub.QBegin
 
 			if i == j { // the path starts here
 				visited[i] = true // mark as visited
@@ -352,12 +385,13 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 				bounds = append(bounds, qe)
 				bounds = append(bounds, tb)
 				bounds = append(bounds, te)
+				nAlignedBases += qe - qb + 1
 				// fmt.Printf("  new bound: (%d, %d) vs (%d, %d)\n", qb, qe, tb, te)
 
 				path = poolChain.Get().(*[]int)
 				*path = (*path)[:0]
 
-				first = true
+				firstAnchorOfAChain = true
 				break
 			}
 
@@ -368,7 +402,7 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) *[]*[]int {
 		i = biggestUnvisitedI
 	}
 
-	return paths
+	return paths, nMatchedBases, nAlignedBases
 }
 
 func distance2(a, b *SubstrPair) int {

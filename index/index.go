@@ -29,7 +29,6 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash"
-	"github.com/shenwei356/lexichash/index/align"
 	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/shenwei356/util/pathutil"
@@ -79,8 +78,8 @@ type Index struct {
 	poolSeqComparator *sync.Pool
 
 	// for sequence alignment
-	alignOptions *align.AlignOptions
-	poolAligner  *sync.Pool
+	// alignOptions *align.AlignOptions
+	// poolAligner  *sync.Pool
 }
 
 // NewIndex ceates a new Index.
@@ -120,7 +119,8 @@ func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
 	}
 
 	idx.SetSearchingOptions(&DefaultSearchOptions)
-	idx.SetAlignOptions(&align.DefaultAlignOptions)
+	// lidx.SetAlignOptions(&align.DefaultAlignOptions)
+	idx.SetCompareOptions(&DefaultSeqComparatorOptions)
 
 	return idx, nil
 }

@@ -21,7 +21,6 @@
 package index
 
 import (
-	"fmt"
 	"sort"
 	"sync"
 
@@ -194,6 +193,10 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 		// t.RecycleSearchResult(srs)
 	}
 
+	if len(*subs) < 1 { // no way, only one match?
+		return 0, err
+	}
+
 	// --------------------------------------------------------------
 	// clear matched substrings
 
@@ -209,48 +212,43 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	subs2 := poolSubs.Get().(*[]*SubstrPair)
 	*subs2 = (*subs2)[:0]
 
-	if len(*subs) == 1 { // no need to clean
-		*subs2 = append(*subs2, (*subs)[0])
-	} else {
-		var p *SubstrPair
-		var upbound, vQEnd, vTEnd int
-		var j int
-		markers := poolBoolList.Get().(*[]bool)
-		*markers = (*markers)[:0]
-		for range *subs {
-			*markers = append(*markers, false)
-		}
-		for i, v := range (*subs)[1:] {
-			vQEnd = v.QBegin + v.Len
-			upbound = vQEnd - k
-			vTEnd = v.TBegin + v.Len
-			j = i
-			for j >= 0 {
-				p = (*subs)[j]
-				if p.QBegin < upbound {
-					break
-				}
-
-				// same or nested region
-				if vQEnd <= p.QBegin+p.Len &&
-					v.TBegin >= p.TBegin && vTEnd <= p.TBegin+p.Len {
-					poolSub.Put(v) // do not forget to recycle the object
-					(*markers)[i+1] = true
-					break
-				}
-
-				j--
-			}
-		}
-
-		for i, embedded := range *markers {
-			if !embedded {
-				*subs2 = append(*subs2, (*subs)[i])
-			}
-		}
-		poolBoolList.Put(markers)
-		poolSubs.Put(subs)
+	var p *SubstrPair
+	var upbound, vQEnd, vTEnd int
+	markers := poolBoolList.Get().(*[]bool)
+	*markers = (*markers)[:0]
+	for range *subs {
+		*markers = append(*markers, false)
 	}
+	for i, v := range (*subs)[1:] {
+		vQEnd = v.QBegin + v.Len
+		upbound = vQEnd - k
+		vTEnd = v.TBegin + v.Len
+		j = i
+		for j >= 0 {
+			p = (*subs)[j]
+			if p.QBegin < upbound {
+				break
+			}
+
+			// same or nested region
+			if vQEnd <= p.QBegin+p.Len &&
+				v.TBegin >= p.TBegin && vTEnd <= p.TBegin+p.Len {
+				poolSub.Put(v) // do not forget to recycle the object
+				(*markers)[i+1] = true
+				break
+			}
+
+			j--
+		}
+	}
+
+	for i, embedded := range *markers {
+		if !embedded {
+			*subs2 = append(*subs2, (*subs)[i])
+		}
+	}
+	poolBoolList.Put(markers)
+	poolSubs.Put(subs)
 
 	// fmt.Println("----------- cleaned anchors ----------")
 	// for _, sub := range *subs2 {
@@ -261,32 +259,23 @@ func (cpr *SeqComparator) Compare(s []byte) (float64, error) {
 	// --------------------------------------------------------------
 	// chaining paired substrings
 
-	chains := cpr.chainer.Chain(subs2)
+	chains, nMatchedBases, nAlignedBases := cpr.chainer.Chain(subs2)
 	if len(*chains) == 0 {
 		RecycleChainingResult(chains)
 		return 0, nil
 	}
 
-	// --------------------------------------------------------------
-	// compute similarity
+	// var i int
+	// var sub *SubstrPair
+	// for c, chain := range *chains {
+	// 	for _, i = range *chain {
+	// 		sub = (*subs2)[i]
+	// 		fmt.Printf("chain: %d, %s\n", c, sub)
+	// 	}
+	// }
+	// fmt.Printf("%f (%d/%d)\n", ident, nMatchedBases, nAlignedBases)
 
-	var matches = 0
-
-	var i int
-	var sub *SubstrPair
-	for c, chain := range *chains {
-		for _, i = range *chain {
-			sub = (*subs2)[i]
-			fmt.Printf("chain: %d, %s\n", c, sub)
-		}
-	}
-
-	var ident float64
-	if len(s) < cpr.len {
-		ident = float64(matches) / float64(len(s))
-	} else {
-		ident = float64(matches) / float64(cpr.len)
-	}
+	ident := float64(nMatchedBases) / float64(nAlignedBases)
 
 	RecycleChainingResult(chains)
 	return ident, nil

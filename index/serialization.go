@@ -34,7 +34,6 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash"
-	"github.com/shenwei356/lexichash/index/align"
 	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
 	"github.com/shenwei356/util/pathutil"
@@ -362,7 +361,8 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 
 	// searching
 	idx.SetSearchingOptions(&DefaultSearchOptions)
-	idx.SetAlignOptions(&align.DefaultAlignOptions)
+	// idx.SetAlignOptions(&align.DefaultAlignOptions)
+	idx.SetCompareOptions(&DefaultSeqComparatorOptions)
 
 	// 2bit file
 

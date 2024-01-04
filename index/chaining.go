@@ -41,9 +41,7 @@ var DefaultChainingOptions = ChainingOptions{
 	MinDistance: 5,
 }
 
-// Chainer is an object for chaining the seeds.
-// Some variables like the score tables are re-used,
-// so it could help to reduce GC load.
+// Chainer is an object for chaining the lexichash substrings between query and reference sequences.
 type Chainer struct {
 	options *ChainingOptions
 

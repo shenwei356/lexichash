@@ -75,10 +75,12 @@ type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
-	// more about the alignment detail
 	ChainingScore float64 // chaining score
 	Chains        *[]*[]int
-	AlignResults  *[]*align.AlignResult
+
+	// more about the alignment detail
+	// AlignResults *[]*align.AlignResult
+	Identities []float64 // sequence comparing
 }
 
 func (r SearchResult) String() string {
@@ -90,7 +92,8 @@ func (r *SearchResult) Reset() {
 	r.Subs = nil
 	r.ChainingScore = 0
 	r.Chains = nil
-	r.AlignResults = nil
+	// r.AlignResults = nil
+	r.Identities = r.Identities[:0]
 }
 
 // SearchResults represents a list of search results from multiple reference genomes.
@@ -173,12 +176,12 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 	}
 
 	// yes, it might be nil for some failed in chaining
-	if r.AlignResults != nil {
-		for _, ar := range *r.AlignResults {
-			align.RecycleAlignResult(ar)
-		}
-		poolAlignResults.Put(r.AlignResults)
-	}
+	// if r.AlignResults != nil {
+	// 	for _, ar := range *r.AlignResults {
+	// 		align.RecycleAlignResult(ar)
+	// 	}
+	// 	poolAlignResults.Put(r.AlignResults)
+	// }
 
 	poolSearchResult.Put(r)
 }
@@ -226,7 +229,7 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 	}}
 }
 
-// SetCompareOptions sets the alignment options
+// SetCompareOptions sets the sequence comparing options
 func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
 	idx.compareOption = co
 	idx.poolSeqComparator = &sync.Pool{New: func() interface{} {
@@ -235,12 +238,12 @@ func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
 }
 
 // SetAlignOptions sets the alignment options
-func (idx *Index) SetAlignOptions(ao *align.AlignOptions) {
-	idx.alignOptions = ao
-	idx.poolAligner = &sync.Pool{New: func() interface{} {
-		return align.NewAligner(ao)
-	}}
-}
+// func (idx *Index) SetAlignOptions(ao *align.AlignOptions) {
+// 	idx.alignOptions = ao
+// 	idx.poolAligner = &sync.Pool{New: func() interface{} {
+// 		return align.NewAligner(ao)
+// 	}}
+// }
 
 // SearchOptions defineds options used in searching.
 type SearchOptions struct {
@@ -363,8 +366,9 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 						r.IdIdx = idIdx
 						r.Subs = subs
 						r.ChainingScore = 0
-						r.Chains = nil       // important
-						r.AlignResults = nil // important
+						r.Chains = nil // important
+						// r.AlignResults = nil // important
+						r.Identities = r.Identities[:0]
 
 						(*m)[idIdx] = r
 					}
@@ -449,8 +453,14 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	rdr := <-idx.twobitReaders
 
-	aligner := idx.poolAligner.Get().(*align.Aligner)
+	// aligner := idx.poolAligner.Get().(*align.Aligner)
+	cpr := idx.poolSeqComparator.Get().(*SeqComparator)
+	err = cpr.Init(s)
+	if err != nil {
+		return nil, err
+	}
 
+	var ident float64
 	for _, r := range *rs {
 		ars := poolAlignResults.Get().(*[]*align.AlignResult)
 		*ars = (*ars)[:0]
@@ -486,7 +496,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				tEnd = te + qlen - qe - 1
 			}
 
-			fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
+			// fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
 
 			tSeq, err = rdr.SubSeq(r.IdIdx, tBegin, tEnd)
 			if err != nil {
@@ -501,21 +511,27 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 			// costly (pseudo-)alignment
 
-			ar := aligner.Global(s, *tSeq)
-			*ars = append(*ars, ar)
+			// ar := aligner.Global(s, *tSeq)
+			// *ars = append(*ars, ar)
+
+			ident, err = cpr.Compare(*tSeq)
+			if err != nil {
+				return nil, err
+			}
+			r.Identities = append(r.Identities, ident)
 
 			twobit.RecycleTwoBit(tSeq)
 		}
-		r.AlignResults = ars
+		// r.AlignResults = ars
 	}
 
-	idx.poolAligner.Put(aligner)
+	// idx.poolAligner.Put(aligner)
 	idx.twobitReaders <- rdr
 
 	return rs, nil
 }
 
-// RC compute the reverse complement sequence
+// RC computes the reverse complement sequence
 func RC(s []byte) []byte {
 	n := len(s)
 	for i := 0; i < n; i++ {
