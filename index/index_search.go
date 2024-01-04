@@ -257,7 +257,9 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 
 	if r.SeqComparatorResults != nil {
 		for _, cr := range *r.SeqComparatorResults {
-			RecycleSeqComparatorResult(cr)
+			if cr != nil {
+				RecycleSeqComparatorResult(cr)
+			}
 		}
 		poolSeqComparatorResults.Put(r.SeqComparatorResults)
 	}
@@ -518,7 +520,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				tEnd = te + qlen - qe - 1
 			}
 
-			fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
+			// fmt.Printf("subject:%s:%d-%d, rc:%v\n", idx.IDs[r.IdIdx], tBegin+1, tEnd+1, rc)
 
 			// extract target sequence for comparison.
 			// Right now, we fetch seq from disk for each seq,
@@ -544,6 +546,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				return nil, err
 			}
 			if cr == nil {
+				*crs = append(*crs, nil)
 				twobit.RecycleTwoBit(tSeq)
 				continue
 			}
