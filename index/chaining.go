@@ -112,15 +112,12 @@ func (ce *Chainer) Chain(subs *[]*SubstrPair) (*[]*[]int, float64) {
 	}
 	// the maximum score for each seed, the size is n
 	maxscores := ce.maxscores[:0]
-	for i = 0; i < n; i++ {
-		maxscores = append(maxscores, 0)
-	}
 	// index of previous seed, the size is n
 	maxscoresIdxs := ce.maxscoresIdxs[:0]
 	for i = 0; i < n; i++ {
+		maxscores = append(maxscores, 0)
 		maxscoresIdxs = append(maxscoresIdxs, 0)
 	}
-
 	// initialize
 	for i, b := range *subs { // j == i, means a path starting from this seed
 		j0 = i * (i + 1) >> 1
@@ -143,7 +140,7 @@ func (ce *Chainer) Chain(subs *[]*SubstrPair) (*[]*[]int, float64) {
 		m = scores[k]
 		mj = i
 
-		for j = 0; j < i; j++ { // try all previous seeds
+		for j = 0; j < i; j++ { // try all previous seeds, no bound
 			k = j0 + j
 			a, b = (*subs)[i], (*subs)[j]
 

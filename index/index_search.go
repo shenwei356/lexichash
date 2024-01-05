@@ -27,7 +27,6 @@ import (
 
 	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
-	"github.com/twotwotwo/sorts"
 )
 
 // SearchOptions defineds options used in searching.
@@ -123,13 +122,84 @@ var poolSubs = &sync.Pool{New: func() interface{} {
 	return &tmp
 }}
 
+// ClearSubstrPairs removes nested/embedded and same anchors. k is the largest k-mer size.
+func ClearSubstrPairs(subs *[]*SubstrPair, k int) {
+	if len(*subs) < 2 {
+		return
+	}
+
+	// sort substrings/seeds in ascending order based on the starting position
+	// and in descending order based on the ending position.
+	sort.Slice(*subs, func(i, j int) bool {
+		a := (*subs)[i]
+		b := (*subs)[j]
+		if a.QBegin == b.QBegin {
+			return a.QBegin+a.Len >= b.QBegin+b.Len
+		}
+		return a.QBegin < b.QBegin
+	})
+
+	var p *SubstrPair
+	var upbound, vQEnd, vTEnd int
+	var j int
+	markers := poolBoolList.Get().(*[]bool)
+	*markers = (*markers)[:0]
+	for range *subs {
+		*markers = append(*markers, false)
+	}
+	for i, v := range (*subs)[1:] {
+		vQEnd = v.QBegin + v.Len
+		upbound = vQEnd - k
+		vTEnd = v.TBegin + v.Len
+		j = i
+		for j >= 0 { // have to check previous N seeds
+			p = (*subs)[j]
+			if p.QBegin < upbound { // no need to check
+				break
+			}
+
+			// same or nested region
+			if vQEnd <= p.QBegin+p.Len &&
+				v.TBegin >= p.TBegin && vTEnd <= p.TBegin+p.Len {
+				poolSub.Put(v)         // do not forget to recycle the object
+				(*markers)[i+1] = true // because of: range (*subs)[1:]
+				break
+			}
+
+			j--
+		}
+	}
+
+	j = 0
+	for i, embedded := range *markers {
+		if !embedded {
+			(*subs)[j] = (*subs)[i]
+			j++
+		}
+	}
+	if j > 0 {
+		*subs = (*subs)[:j]
+	}
+
+	poolBoolList.Put(markers)
+}
+
+var poolBoolList = &sync.Pool{New: func() interface{} {
+	m := make([]bool, 0, 1024)
+	return &m
+}}
+
 // var poolAlignResults = &sync.Pool{New: func() interface{} {
 // 	tmp := make([]*align.AlignResult, 0, 8)
 // 	return &tmp
 // }}
 
-var poolSeqComparatorResults = &sync.Pool{New: func() interface{} {
-	tmp := make([]*SeqComparatorResult, 0, 8)
+var poolSimilarityDetail = &sync.Pool{New: func() interface{} {
+	return &SimilarityDetail{}
+}}
+
+var poolSimilarityDetails = &sync.Pool{New: func() interface{} {
+	tmp := make([]*SimilarityDetail, 0, 8)
 	return &tmp
 }}
 
@@ -147,90 +217,32 @@ type SearchResult struct {
 	IdIdx int            // index of the matched reference ID
 	Subs  *[]*SubstrPair // matched substring pairs (query,target)
 
-	ChainingScore float64 // chaining score
-	Chains        *[]*[]int
+	Score float64 //  score for soring
+
+	Chains *[]*[]int
 
 	// more about the alignment detail
 	// AlignResults *[]*align.AlignResult
-	SeqComparatorResults *[]*SeqComparatorResult // sequence comparing
+	SimilarityDetails *[]*SimilarityDetail // sequence comparing
 }
 
-func (r SearchResult) String() string {
-	return fmt.Sprintf("IdIdx: %d, Subs: %v", r.IdIdx, r.Subs)
+type SimilarityDetail struct {
+	TBegin int
+	TEnd   int
+	RC     bool
+
+	SimilarityScore float64
+	Similarity      *SeqComparatorResult
+	Chain           *[]int
 }
 
 func (r *SearchResult) Reset() {
 	r.IdIdx = -1
 	r.Subs = nil
-	r.ChainingScore = 0
+	r.Score = 0
 	r.Chains = nil
 	// r.AlignResults = nil
-	r.SeqComparatorResults = nil
-}
-
-// SearchResults represents a list of search results from multiple reference genomes.
-type SearchResults []*SearchResult
-
-func (s SearchResults) Len() int      { return len(s) }
-func (s SearchResults) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
-func (s SearchResults) Less(i, j int) bool {
-	a := s[i]
-	b := s[j]
-	if a.ChainingScore == b.ChainingScore {
-		if len(*a.Subs) == len(*b.Subs) {
-			return a.IdIdx < b.IdIdx
-		}
-		return len(*a.Subs) < len(*b.Subs)
-	}
-	return a.ChainingScore > b.ChainingScore
-}
-
-// CleanSubstrs removes duplicated substrings pairs and computes the score.
-func (r *SearchResult) CleanSubstrs() {
-	if len(*r.Subs) == 1 {
-		p := (*r.Subs)[0]
-		// Here's it for fast screening, not the real chaining score
-		r.ChainingScore = float64(p.Len) * float64(p.Len)
-		return
-	}
-
-	// sort substrings/seeds in ascending order based on the starting position
-	// and in descending order based on the ending position.
-	_subs := *r.Subs
-	sort.Slice(_subs, func(i, j int) bool {
-		a := _subs[i]
-		b := _subs[j]
-		if a.QBegin == b.QBegin {
-			return a.QBegin+a.Len >= b.QBegin+b.Len
-		}
-		return a.QBegin < b.QBegin
-	})
-
-	// check all seeds pairs,
-	// and remove a pair with both seeds covered by the previous one.
-	subs := poolSubs.Get().(*[]*SubstrPair)
-	*subs = (*subs)[:1]
-
-	var p, v *SubstrPair
-	p = (*r.Subs)[0] // the first pair
-	(*subs)[0] = p
-
-	// Here's it for fast screening, not the real chaining score
-	r.ChainingScore = float64(p.Len) * float64(p.Len)
-	for _, v = range (*r.Subs)[1:] {
-		// same or nested region
-		if v.QBegin+v.Len <= p.QBegin+p.Len &&
-			v.TBegin >= p.TBegin && v.TBegin+v.Len <= p.TBegin+p.Len {
-			poolSub.Put(v) // do not forget to recycle the object
-			continue
-		}
-		r.ChainingScore += float64(v.Len) * float64(v.Len)
-
-		*subs = append(*subs, v)
-		p = v
-	}
-	poolSubs.Put(r.Subs)
-	r.Subs = subs
+	r.SimilarityDetails = nil
 }
 
 // RecycleSearchResults recycles a search result object
@@ -255,13 +267,12 @@ func (idx *Index) RecycleSearchResult(r *SearchResult) {
 	// 	poolAlignResults.Put(r.AlignResults)
 	// }
 
-	if r.SeqComparatorResults != nil {
-		for _, cr := range *r.SeqComparatorResults {
-			if cr != nil {
-				RecycleSeqComparatorResult(cr)
-			}
+	if r.SimilarityDetails != nil {
+		for _, sd := range *r.SimilarityDetails {
+			RecycleSeqComparatorResult(sd.Similarity)
+			poolSimilarityDetail.Put(sd)
 		}
-		poolSeqComparatorResults.Put(r.SeqComparatorResults)
+		poolSimilarityDetails.Put(r.SimilarityDetails)
 	}
 
 	poolSearchResult.Put(r)
@@ -299,7 +310,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	// ----------------------------------------------------------------
 	// matching the captured k-mers in databases
 
-	// a map for collecting matches for each reference: IdIdex -> result
+	// a map for collecting matches for each reference: IdIdx -> result
 	m := poolSearchResultsMap.Get().(*map[int]*SearchResult)
 	clear(*m) // requires go >= v1.21
 
@@ -382,10 +393,10 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 						r = poolSearchResult.Get().(*SearchResult)
 						r.IdIdx = idIdx
 						r.Subs = subs
-						r.ChainingScore = 0
+						r.Score = 0
 						r.Chains = nil // important
 						// r.AlignResults = nil // important
-						r.SeqComparatorResults = nil // important
+						r.SimilarityDetails = nil // important
 
 						(*m)[idIdx] = r
 					}
@@ -413,17 +424,27 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	minSinglePrefix := int(idx.searchOptions.MinSinglePrefix)
 	for _, r := range *m {
-		r.CleanSubstrs() // remove duplicates
+		ClearSubstrPairs(r.Subs, K) // remove duplicates and nested anchors
+
+		// there's no need to chain for a single short seed
 		if len(*r.Subs) == 1 && (*r.Subs)[0].Len < minSinglePrefix {
 			// do not forget to recycle filtered result
 			idx.RecycleSearchResult(r)
 			continue
 		}
+
+		for _, sub := range *r.Subs {
+			r.Score += float64(sub.Len * sub.Len)
+		}
+
 		*rs = append(*rs, r)
 	}
 
-	// sort subjects in descending order based on the score (simple statistics)
-	sorts.Quicksort(SearchResults(*rs))
+	// sort subjects in descending order based on the score (simple statistics).
+	// just use the standard library for a few seed pairs.
+	sort.Slice(*rs, func(i, j int) bool {
+		return (*rs)[i].Score > (*rs)[j].Score
+	})
 
 	poolSearchResultsMap.Put(m)
 
@@ -440,11 +461,12 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		*rs = (*rs)[:topN]
 	}
 
+	// chaining
 	chainer := idx.poolChainers.Get().(*Chainer)
 	j := 0
 	for _, r := range *rs {
-		r.Chains, r.ChainingScore = chainer.Chain(r.Subs)
-		if r.ChainingScore < minChainingScore {
+		r.Chains, r.Score = chainer.Chain(r.Subs)
+		if r.Score < minChainingScore {
 			idx.RecycleSearchResult(r) // do not forget to recycle unused objects
 			continue
 		} else {
@@ -484,11 +506,14 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 	for _, r := range *rs {
 		// ars := poolAlignResults.Get().(*[]*align.AlignResult)
 		// *ars = (*ars)[:0]
-		crs := poolSeqComparatorResults.Get().(*[]*SeqComparatorResult)
-		*crs = (*crs)[:0]
+		sds := poolSimilarityDetails.Get().(*[]*SimilarityDetail)
+		*sds = (*sds)[:0]
 
 		// check sequences from all chains
-		for _, chain = range *r.Chains {
+		for i, chain = range *r.Chains {
+			// ------------------------------------------------------------------------
+			// extract subsequence from the refseq for comparing
+
 			// the first seed pair
 			sub = (*r.Subs)[(*chain)[0]]
 			qs = sub.QBegin
@@ -534,6 +559,9 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				RC(*tSeq)
 			}
 
+			// ------------------------------------------------------------------------
+			// comparing the two sequences
+
 			// fast filter with sketching comparison
 
 			// costly (pseudo-)alignment
@@ -545,22 +573,28 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			if err != nil {
 				return nil, err
 			}
-			if cr == nil {
-				*crs = append(*crs, nil)
+			if cr == nil || cr.AlignedFraction < minAF || cr.Identity < minIdent {
 				twobit.RecycleTwoBit(tSeq)
 				continue
 			}
 
-			if cr.AlignedFraction >= minAF && cr.Identity >= minIdent {
-				*crs = append(*crs, cr)
-			} else {
-				*crs = append(*crs, nil)
-			}
+			sd := poolSimilarityDetail.Get().(*SimilarityDetail)
+			sd.TBegin = tBegin
+			sd.TEnd = tEnd
+			sd.RC = rc
+			sd.Chain = (*r.Chains)[i]
+			sd.Similarity = cr
+			sd.SimilarityScore = cr.AlignedFraction * cr.Identity
+
+			*sds = append(*sds, sd)
 
 			twobit.RecycleTwoBit(tSeq)
 		}
 		// r.AlignResults = ars
-		r.SeqComparatorResults = crs
+		sort.Slice(*sds, func(i, j int) bool {
+			return (*sds)[i].SimilarityScore > (*sds)[j].SimilarityScore
+		})
+		r.SimilarityDetails = sds
 	}
 
 	// idx.poolAligner.Put(aligner)

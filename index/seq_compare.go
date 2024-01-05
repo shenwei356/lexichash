@@ -21,7 +21,6 @@
 package index
 
 import (
-	"sort"
 	"sync"
 
 	rtree "github.com/shenwei356/lexichash/index/recyclable-tree"
@@ -193,59 +192,10 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	// --------------------------------------------------------------
 	// clear matched substrings
 
-	sort.Slice(*subs, func(i, j int) bool {
-		a := (*subs)[i]
-		b := (*subs)[j]
-		if a.QBegin == b.QBegin {
-			return a.QBegin+a.Len >= b.QBegin+b.Len
-		}
-		return a.QBegin < b.QBegin
-	})
-
-	subs2 := poolSubs.Get().(*[]*SubstrPair)
-	*subs2 = (*subs2)[:0]
-
-	var p *SubstrPair
-	var upbound, vQEnd, vTEnd int
-	var j int
-	markers := poolBoolList.Get().(*[]bool)
-	*markers = (*markers)[:0]
-	for range *subs {
-		*markers = append(*markers, false)
-	}
-	for i, v := range (*subs)[1:] {
-		vQEnd = v.QBegin + v.Len
-		upbound = vQEnd - k
-		vTEnd = v.TBegin + v.Len
-		j = i
-		for j >= 0 {
-			p = (*subs)[j]
-			if p.QBegin < upbound {
-				break
-			}
-
-			// same or nested region
-			if vQEnd <= p.QBegin+p.Len &&
-				v.TBegin >= p.TBegin && vTEnd <= p.TBegin+p.Len {
-				poolSub.Put(v) // do not forget to recycle the object
-				(*markers)[i+1] = true
-				break
-			}
-
-			j--
-		}
-	}
-
-	for i, embedded := range *markers {
-		if !embedded {
-			*subs2 = append(*subs2, (*subs)[i])
-		}
-	}
-	poolBoolList.Put(markers)
-	poolSubs.Put(subs)
+	ClearSubstrPairs(subs, k)
 
 	// fmt.Println("----------- cleaned anchors ----------")
-	// for _, sub := range *subs2 {
+	// for _, sub := range *subs {
 	// 	fmt.Printf("%s\n", sub)
 	// }
 	// fmt.Println("-------------------------------")
@@ -253,7 +203,7 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	// --------------------------------------------------------------
 	// chaining paired substrings
 
-	chains, nMatchedBases, nAlignedBases := cpr.chainer.Chain(subs2)
+	chains, nMatchedBases, nAlignedBases := cpr.chainer.Chain(subs)
 	if len(*chains) == 0 {
 		RecycleChainingResult(chains)
 		return nil, nil
@@ -283,8 +233,3 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	RecycleChainingResult(chains)
 	return r, nil
 }
-
-var poolBoolList = &sync.Pool{New: func() interface{} {
-	m := make([]bool, 0, 1024)
-	return &m
-}}
