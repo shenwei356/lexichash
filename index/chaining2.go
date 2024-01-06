@@ -27,7 +27,7 @@ import (
 // Chaining2Options contains all options in chaining.
 type Chaining2Options struct {
 	MaxGap   int
-	MinScore int
+	MinScore int // minimum score of a chain
 
 	// only used in Chain2
 	MaxDistance int
@@ -37,7 +37,7 @@ type Chaining2Options struct {
 // DefaultChaining2Options is the defalt vaule of Chaining2Option.
 var DefaultChaining2Options = Chaining2Options{
 	MaxGap:   32,
-	MinScore: 7,
+	MinScore: 20,
 
 	MaxDistance: 50,
 	Band:        20,
@@ -54,8 +54,8 @@ type Chainer2 struct {
 	// scores        []int
 	maxscores     []int
 	maxscoresIdxs []int
-	visited       []bool
-	bounds        []int // 4 * chains
+
+	bounds []int // 4 * chains
 }
 
 // NewChainer creates a new chainer.
@@ -66,7 +66,6 @@ func NewChainer2(options *Chaining2Options) *Chainer2 {
 		// scores:        make([]int, 0, 10240),
 		maxscores:     make([]int, 0, 10240),
 		maxscoresIdxs: make([]int, 0, 10240),
-		visited:       make([]bool, 0, 10240),
 		bounds:        make([]int, 32),
 	}
 	return c
@@ -82,12 +81,12 @@ func RecycleChaining2Result(chains *[]*[]int) {
 }
 
 var poolChains2 = &sync.Pool{New: func() interface{} {
-	tmp := make([]*[]int, 0, 8)
+	tmp := make([]*[]int, 0, 32)
 	return &tmp
 }}
 
 var poolChain2 = &sync.Pool{New: func() interface{} {
-	tmp := make([]int, 0, 32)
+	tmp := make([]int, 0, 1024)
 	return &tmp
 }}
 
@@ -132,16 +131,15 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
 	// reused objects
 
 	// the maximum score for each seed, the size is n
-	maxscores := ce.maxscores[:0]
+	maxscores := ce.maxscores
+	maxscores = maxscores[:0]
 	// index of previous seed, the size is n. pointers for backtracking.
-	maxscoresIdxs := ce.maxscoresIdxs[:0]
-	// for markinng check anchors
-	visited := ce.visited[:0]
+	maxscoresIdxs := ce.maxscoresIdxs
+	maxscoresIdxs = maxscoresIdxs[:0]
 
 	// initialize
 	maxscores = append(maxscores, (*subs)[0].Len)
 	maxscoresIdxs = append(maxscoresIdxs, 0)
-	visited = append(visited, false)
 
 	// compute scores
 	var s, m, M, d, g int
@@ -192,7 +190,6 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
 
 		maxscores = append(maxscores, m)          // save the max score of the whole
 		maxscoresIdxs = append(maxscoresIdxs, mj) // save where the max score comes from
-		visited = append(visited, false)          // append marks
 
 		if m > M { // the biggest score in the whole score matrix
 			M, Mi = m, i
@@ -216,204 +213,203 @@ func (ce *Chainer2) Chain(subs *[]*SubstrPair) (*[]*[]int, int, int) {
 
 	// backtrack
 
-	var firstAnchorOfAChain bool
-	minScore := ce.options.MinScore
-
 	paths := poolChains.Get().(*[]*[]int)
 	*paths = (*paths)[:0]
-	var nMatchedBases, nAlignedBases int
 
 	// check the highest score, for early quit,
 	// but what's the number?
 	if M < 100 {
-		return paths, nMatchedBases, nAlignedBases
+		return paths, 0, 0
 	}
 
-	// ---------------- the chain with the highest score  -----------------
-
-	path := poolChain.Get().(*[]int)
-	*path = (*path)[:0]
-
-	i = Mi
-	firstAnchorOfAChain = true
-	var qb, qe, tb, te int // the bound
-	var sub *SubstrPair = (*subs)[i]
-	qe, te = sub.QBegin+sub.Len-1, sub.TBegin+sub.Len-1 // end
-	var beginOfNextAnchor int                           // for counting matched bases
-	for {
-		if firstAnchorOfAChain && maxscores[i] < minScore { // the highest score is not good enough
-			return paths, 0, 0 // an empty path
-		}
-
-		j = maxscoresIdxs[i] // previous seed
-
-		*path = append(*path, i) // record the seed
-		visited[i] = true        // mark as visited
-		sub = (*subs)[i]
-		if firstAnchorOfAChain {
-			firstAnchorOfAChain = false
-			nMatchedBases += sub.Len
-		} else {
-			if sub.QBegin+sub.Len-1 >= beginOfNextAnchor {
-				nMatchedBases += beginOfNextAnchor - sub.QBegin
-			} else {
-				nMatchedBases += sub.Len
-			}
-		}
-		beginOfNextAnchor = sub.QBegin
-
-		if i == j { // the path starts here
-			break
-		}
-		i = j
-	}
-	reverseInts(*path)
-	*paths = append(*paths, path)
-
-	// fmt.Printf("first max: i=%d, score=%d, \n", Mi, M)
-
-	sub = (*subs)[i]
-	qb, tb = sub.QBegin, sub.TBegin // begin
-
-	// intervals for checking overlap
+	var nMatchedBases, nAlignedBases int
+	minScore := ce.options.MinScore
 	bounds := ce.bounds[:0]
-	bounds = append(bounds, qb)
-	bounds = append(bounds, qe)
-	bounds = append(bounds, tb)
-	bounds = append(bounds, te)
-	nAlignedBases += qe - qb + 1
-	// fmt.Printf("nAlignedBases: %d, new bound: (%d, %d) vs (%d, %d)\n", nAlignedBases, qb, qe, tb, te)
 
-	// ------------------------- other chains ----------------------------
+	chainARegion(
+		subs,
+		maxscores,
+		maxscoresIdxs,
+		0,
+		minScore,
+		paths,
+		&nMatchedBases,
+		&nAlignedBases,
+		Mi,
+		&bounds,
+	)
 
-	path = poolChain.Get().(*[]int)
-	*path = (*path)[:0]
+	return paths, nMatchedBases, nAlignedBases
+}
 
-	i = n - 1 // the biggest unvisited i
-	var overlapped bool
-	var biggestUnvisitedI int
-	var computeBiggestUnvisitedI bool
-	var nb, bi, bj int // index of bounds
-	for {
+func chainARegion(subs *[]*SubstrPair, // a region of the subs
+	maxscores []int, // a region of maxscores
+	maxscoresIdxs []int,
+	offset int, // offset of this region of subs
+	minScore int, // the threshold
+	paths *[]*[]int, // paths
+	nMatchedBases *int,
+	nAlignedBases *int,
+	Mi0 int, // found Mi
+	bounds *[]int, // intervals of previous chains
+) {
+	// fmt.Printf("region: [%d, %d]\n", offset, offset+len(*subs)-1)
+	var m, M int
+	var i, Mi int
+	if Mi0 < 0 { // Mi is not given
 		// find the next highest score
-		M, Mi = 0, i
-		computeBiggestUnvisitedI = true
-		for ; i >= 0; i-- {
-			if visited[i] {
-				continue
-			}
-			if computeBiggestUnvisitedI {
-				biggestUnvisitedI = i
-				computeBiggestUnvisitedI = false
-			}
-			m = maxscores[i]
+		for i, m = range maxscores {
 			if m > M {
 				M, Mi = m, i
 			}
 		}
 		if M < minScore { // no valid anchors
+			return
+		}
+	} else {
+		Mi = Mi0
+	}
+	// fmt.Printf("  Mi: %d, M: %d\n", Mi, M)
+
+	i = Mi
+	var j int
+	var qb, qe, tb, te int // the bound
+	var sub *SubstrPair
+	var beginOfNextAnchor int
+	var overlapped bool
+	var nb, bi, bj int // index of bounds
+	firstAnchorOfAChain := true
+	path := poolChain.Get().(*[]int)
+	*path = (*path)[:0]
+	for {
+		j = maxscoresIdxs[i] - offset // previous seed
+
+		if j < 0 { // the first anchor is not in current region
 			break
 		}
-		i = Mi
 
-		// fmt.Printf("next max: i=%d, score=%d, j=%d, biggestUnvisitedI: %d \n",
-		// 	Mi, M, maxscoresIdxs[i], biggestUnvisitedI)
-
-		// find valid anchor for this chain
-		firstAnchorOfAChain = true
-		for {
-			j = maxscoresIdxs[i] // previous seed
-			// fmt.Printf("  i:%d, j:%d\n", i, j)
-			if visited[j] { // curent seed is abandoned
-				visited[i] = true // mark as visited
-				// fmt.Printf("  %d is abandoned, j=%d\n", i, j)
+		// check if an anchor overlaps with previous chains
+		//
+		// Query
+		// |        te  / (OK)
+		// |        |  /
+		// |(NO)/   |____qe
+		// |   /   /
+		// |qb____/    / (NO)
+		// |   /  |   /
+		// |OK/   |tb
+		// o-------------------- Ref
+		//
+		sub = (*subs)[i]
+		overlapped = false
+		nb = len(*bounds) >> 2 // len(bounds) / 4
+		for bi = 0; bi < nb; bi++ {
+			bj = bi << 2
+			if !((sub.QBegin > (*bounds)[bj+1] && sub.TBegin > (*bounds)[bj+3]) || // top right
+				(sub.QBegin+sub.Len-1 < (*bounds)[bj] && sub.TBegin+sub.Len-1 < (*bounds)[bj+2])) { // bottom left
+				overlapped = true
 				break
 			}
-
-			// check if an anchor overlaps with previous chains
-			//
-			// Query
-			// |        te  / (OK)
-			// |        |  /
-			// |(NO)/   |____qe
-			// |   /   /
-			// |qb____/    / (NO)
-			// |   /  |   /
-			// |OK/   |tb
-			// o-------------------- Ref
-			//
-			sub = (*subs)[i]
-			overlapped = false
-			nb = len(bounds) >> 2 // len(bounds) / 4
-			for bi = 0; bi < nb; bi++ {
-				bj = bi << 2
-				if !((sub.QBegin > bounds[bj+1] && sub.TBegin > bounds[bj+3]) || // top right
-					(sub.QBegin+sub.Len-1 < bounds[bj] && sub.TBegin+sub.Len-1 < bounds[bj+2])) { // bottom left
-					overlapped = true
-					break
-				}
-			}
-			if overlapped {
-				// fmt.Printf("  %d (%s) is overlapped previous chain, j=%d\n", i, *sub, j)
-
-				// can not continue here, must check if i == j
-			} else {
-				*path = append(*path, i) // record the seed
-				sub = (*subs)[i]
-				// fmt.Printf(" AAADDD %d (%s). firstAnchorOfAChain: %v\n", i, *sub, firstAnchorOfAChain)
-				if firstAnchorOfAChain {
-					// fmt.Printf(" record bound beginning with: %s\n", sub)
-					firstAnchorOfAChain = false
-
-					qe, te = sub.QBegin+sub.Len-1, sub.TBegin+sub.Len-1 // end
-					qb, tb = sub.QBegin, sub.TBegin                     // begin
-
-					nMatchedBases += sub.Len
-				} else {
-					qb, tb = sub.QBegin, sub.TBegin // begin
-
-					if sub.QBegin+sub.Len-1 >= beginOfNextAnchor {
-						nMatchedBases += beginOfNextAnchor - sub.QBegin
-					} else {
-						nMatchedBases += sub.Len
-					}
-				}
-				beginOfNextAnchor = sub.QBegin
-			}
-
-			if i == j { // the path starts here
-				visited[i] = true // mark as visited
-
-				if firstAnchorOfAChain { // sadly, there's no anchor added.
-					break
-				}
-
-				reverseInts(*path)
-				*paths = append(*paths, path)
-
-				// add the interval of this chain
-				bounds = append(bounds, qb)
-				bounds = append(bounds, qe)
-				bounds = append(bounds, tb)
-				bounds = append(bounds, te)
-				nAlignedBases += qe - qb + 1
-				// fmt.Printf("nAlignedBases: %d, new bound: (%d, %d) vs (%d, %d)\n", nAlignedBases, qb, qe, tb, te)
-
-				path = poolChain.Get().(*[]int)
-				*path = (*path)[:0]
-
-				firstAnchorOfAChain = true
-				break
-			}
-
-			visited[i] = true // mark as visited
-			i = j
 		}
 
-		i = biggestUnvisitedI
+		if overlapped {
+			// fmt.Printf("  %d (%s) is overlapped previous chain, j=%d\n", i, *sub, j)
+
+			// can not continue here, must check if i == j
+		} else {
+			*path = append(*path, i+offset) // record the seed
+
+			// fmt.Printf(" AAADDD %d (%s). firstAnchorOfAChain: %v\n", i, *sub, firstAnchorOfAChain)
+
+			if firstAnchorOfAChain {
+				// fmt.Printf(" record bound beginning with: %s\n", sub)
+				firstAnchorOfAChain = false
+
+				qe = sub.QBegin + sub.Len - 1   // end
+				qb, tb = sub.QBegin, sub.TBegin // in case there's only one anchor
+
+				*nMatchedBases += sub.Len
+			} else {
+				qb, tb = sub.QBegin, sub.TBegin // begin
+
+				if sub.QBegin+sub.Len-1 >= beginOfNextAnchor {
+					*nMatchedBases += beginOfNextAnchor - sub.QBegin
+				} else {
+					*nMatchedBases += sub.Len
+				}
+			}
+			beginOfNextAnchor = sub.QBegin
+		}
+
+		if i == j { // the path starts here
+			if firstAnchorOfAChain { // sadly, there's no anchor added.
+				break
+			}
+
+			reverseInts(*path)
+			*paths = append(*paths, path)
+
+			*nAlignedBases += qe - qb + 1
+
+			firstAnchorOfAChain = true
+			break
+		}
+
+		i = j
 	}
 
-	return paths, nMatchedBases, nAlignedBases
+	if j < 0 { // the first anchor is not in current region
+		// fmt.Printf(" found only part of the chain, nAnchors: %d\n", len(*path))
+		if len(*path) == 0 {
+			poolChain.Put(path)
+		} else {
+			reverseInts(*path)
+			*paths = append(*paths, path)
+
+			*nAlignedBases += qe - qb + 1
+		}
+	}
+
+	*bounds = append(*bounds, qb)
+	*bounds = append(*bounds, qe)
+	*bounds = append(*bounds, tb)
+	*bounds = append(*bounds, te)
+
+	// fmt.Printf("  i: %d\n", i)
+
+	// the unchecked region on the right
+	if Mi != len(maxscores)-1 { // Mi is not the last element
+		tmp := (*subs)[Mi+1:]
+		chainARegion(
+			&tmp,
+			maxscores[Mi+1:],
+			maxscoresIdxs[Mi+1:],
+			offset+Mi+1,
+			minScore,
+			paths,
+			nMatchedBases,
+			nAlignedBases,
+			-1,
+			bounds,
+		)
+	}
+
+	// the unchecked region on the left
+	if i > 0 { // the first anchor is not the first element
+		tmp := (*subs)[:i]
+		chainARegion(
+			&tmp,
+			maxscores[:i],
+			maxscoresIdxs[:i],
+			offset,
+			minScore,
+			paths,
+			nMatchedBases,
+			nAlignedBases,
+			-1,
+			bounds,
+		)
+	}
 }
 
 func distance2(a, b *SubstrPair) int {

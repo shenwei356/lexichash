@@ -38,14 +38,13 @@ type SeqComparatorOptions struct {
 // DefaultSeqComparatorOptions contains the default options for SeqComparatorOptions.
 var DefaultSeqComparatorOptions = SeqComparatorOptions{
 	K:         32,
-	MinPrefix: 7,
+	MinPrefix: 11, // can not be too small, or there will be a large number of anchors.
 
 	Chaining2Options: Chaining2Options{
 		// should be relative small
 		MaxGap: 32,
-		// should be the same as MinPrefix,
-		// cause the score for a single seed pair is the length of the seed.
-		MinScore: 5,
+		// better be larger than MinPrefix
+		MinScore: 20,
 		// can not be < k
 		MaxDistance: 50,
 		// can not be two small
@@ -195,8 +194,8 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	ClearSubstrPairs(subs, k)
 
 	// fmt.Println("----------- cleaned anchors ----------")
-	// for _, sub := range *subs {
-	// 	fmt.Printf("%s\n", sub)
+	// for i, sub := range *subs {
+	// 	fmt.Printf("%3d: %s\n", i, sub)
 	// }
 	// fmt.Println("-------------------------------")
 
@@ -206,6 +205,7 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	chains, nMatchedBases, nAlignedBases := cpr.chainer.Chain(subs)
 	if len(*chains) == 0 {
 		RecycleChainingResult(chains)
+		RecycleSubstrPairs(subs)
 		return nil, nil
 	}
 
@@ -213,7 +213,7 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	// var sub *SubstrPair
 	// for c, chain := range *chains {
 	// 	for _, i = range *chain {
-	// 		sub = (*subs2)[i]
+	// 		sub = (*subs)[i]
 	// 		fmt.Printf("chain: %d, %s\n", c, sub)
 	// 	}
 	// }
@@ -231,5 +231,15 @@ func (cpr *SeqComparator) Compare(s []byte) (*SeqComparatorResult, error) {
 	}
 
 	RecycleChainingResult(chains)
+	RecycleSubstrPairs(subs)
+
 	return r, nil
+}
+
+// RecycleIndex recycles the Index (tree data).
+// Please call this if you do not need the comparator anymore.
+func (cpr *SeqComparator) RecycleIndex() {
+	if cpr.tree != nil {
+		rtree.RecycleTree(cpr.tree)
+	}
 }

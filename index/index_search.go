@@ -118,9 +118,17 @@ var poolSub = &sync.Pool{New: func() interface{} {
 }}
 
 var poolSubs = &sync.Pool{New: func() interface{} {
-	tmp := make([]*SubstrPair, 0, 32)
+	tmp := make([]*SubstrPair, 0, 1024)
 	return &tmp
 }}
+
+// RecycleSubstrPairs recycles a list of SubstrPairs
+func RecycleSubstrPairs(subs *[]*SubstrPair) {
+	for _, sub := range *subs {
+		poolSub.Put(sub)
+	}
+	poolSubs.Put(subs)
+}
 
 // ClearSubstrPairs removes nested/embedded and same anchors. k is the largest k-mer size.
 func ClearSubstrPairs(subs *[]*SubstrPair, k int) {
@@ -599,6 +607,9 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	// idx.poolAligner.Put(aligner)
 	idx.twobitReaders <- rdr
+
+	// recycle the tree data for this query
+	cpr.RecycleIndex()
 
 	return rs, nil
 }
