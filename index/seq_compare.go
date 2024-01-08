@@ -29,10 +29,16 @@ import (
 
 // SeqComparatorOptions contains options for comparing two sequences.
 type SeqComparatorOptions struct {
+	// indexing
 	K         uint8
 	MinPrefix uint8
 
+	// chaining
 	Chaining2Options
+
+	// seq similarity
+	MinAlignedFraction float64 // percentage
+	MinIdentity        float64 // percentage
 }
 
 // DefaultSeqComparatorOptions contains the default options for SeqComparatorOptions.
@@ -50,6 +56,9 @@ var DefaultSeqComparatorOptions = SeqComparatorOptions{
 		// can not be two small
 		Band: 20,
 	},
+
+	MinAlignedFraction: 70,
+	MinIdentity:        70,
 }
 
 // SeqComparator is for fast and accurate similarity estimation of two sequences,

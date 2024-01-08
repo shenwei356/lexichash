@@ -362,7 +362,7 @@ func NewFromPath(outDir string, threads int) (*Index, error) {
 	// searching
 	idx.SetSearchingOptions(&DefaultSearchOptions)
 	// idx.SetAlignOptions(&align.DefaultAlignOptions)
-	idx.SetCompareOptions(&DefaultSeqComparatorOptions)
+	idx.SetSeqCompareOptions(&DefaultSeqComparatorOptions)
 
 	// 2bit file
 

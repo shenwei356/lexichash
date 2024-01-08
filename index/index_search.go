@@ -38,10 +38,6 @@ type SearchOptions struct {
 
 	// chaining
 	MaxGap float64
-
-	// seq similarity
-	MinAlignedFraction float64 // percentage
-	MinIdentity        float64 // percentage
 }
 
 // DefaultSearchOptions contains default option values.
@@ -51,24 +47,22 @@ var DefaultSearchOptions = SearchOptions{
 	TopN:            10,
 
 	MaxGap: 5000,
-
-	MinAlignedFraction: 70,
-	MinIdentity:        70,
 }
 
 // SetChainingOptions replaces the default chaining option with a new one.
-// func (idx *Index) SetChainingOptions(co *ChainingOptions) {
-// 	idx.chainingOptions = co
-// 	idx.poolChainers = &sync.Pool{New: func() interface{} {
-// 		return NewChainer(co)
-// 	}}
-// }
+func (idx *Index) SetChainingOptions(co *ChainingOptions) {
+	idx.chainingOptions = co
+	idx.poolChainers = &sync.Pool{New: func() interface{} {
+		return NewChainer(co)
+	}}
+}
 
 // SetSearchingOptions sets the searching options.
 // Note that it overwrites the result of SetChainingOption.
 func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 	idx.searchOptions = so
 
+	// chaining
 	co := &ChainingOptions{
 		MaxGap:   so.MaxGap,
 		MinScore: seedWeight(float64(so.MinSinglePrefix)),
@@ -88,11 +82,11 @@ func (idx *Index) SetSearchingOptions(so *SearchOptions) {
 // 	}}
 // }
 
-// SetCompareOptions sets the sequence comparing options
-func (idx *Index) SetCompareOptions(co *SeqComparatorOptions) {
-	idx.compareOption = co
+// SetSeqCompareOptions sets the sequence comparing options
+func (idx *Index) SetSeqCompareOptions(sco *SeqComparatorOptions) {
+	idx.seqCompareOption = sco
 	idx.poolSeqComparator = &sync.Pool{New: func() interface{} {
-		return NewSeqComparator(co)
+		return NewSeqComparator(sco)
 	}}
 }
 
@@ -507,8 +501,8 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 		return nil, err
 	}
 
-	minAF := idx.searchOptions.MinAlignedFraction
-	minIdent := idx.searchOptions.MinIdentity
+	minAF := idx.seqCompareOption.MinAlignedFraction
+	minIdent := idx.seqCompareOption.MinIdentity
 
 	// check all references
 	for _, r := range *rs {
@@ -610,6 +604,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	// recycle the tree data for this query
 	cpr.RecycleIndex()
+	idx.poolSeqComparator.Put(cpr)
 
 	return rs, nil
 }

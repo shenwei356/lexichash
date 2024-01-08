@@ -74,7 +74,7 @@ type Index struct {
 	poolChainers    *sync.Pool
 
 	// for sequence comparing
-	compareOption     *SeqComparatorOptions
+	seqCompareOption  *SeqComparatorOptions
 	poolSeqComparator *sync.Pool
 
 	// for sequence alignment
@@ -120,7 +120,7 @@ func NewIndexWithSeed(k int, nMasks int, seed int64, p int) (*Index, error) {
 
 	idx.SetSearchingOptions(&DefaultSearchOptions)
 	// lidx.SetAlignOptions(&align.DefaultAlignOptions)
-	idx.SetCompareOptions(&DefaultSeqComparatorOptions)
+	idx.SetSeqCompareOptions(&DefaultSeqComparatorOptions)
 
 	return idx, nil
 }
