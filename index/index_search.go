@@ -590,7 +590,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 			*sds = append(*sds, sd)
 
-			twobit.RecycleTwoBit(tSeq)
+			twobit.RecycleSeq(tSeq)
 		}
 		// r.AlignResults = ars
 		sort.Slice(*sds, func(i, j int) bool {
@@ -604,6 +604,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 
 	// recycle the tree data for this query
 	cpr.RecycleIndex()
+	// recycle this comparator
 	idx.poolSeqComparator.Put(cpr)
 
 	return rs, nil
