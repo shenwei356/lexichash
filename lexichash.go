@@ -271,10 +271,8 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // The regions should be 0-based and ascendingly sorted.
 // e.g., [100, 130], [200, 230] ...
 func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
-	// the k-mer iterator is different from that in
+	// This k-mer iterator is a simplified version of
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
-	// this one only supports k<=31, with the last two bits as a flag
-	// for marking if the k-mer is from the negative strand.
 	iter, err := iterator.NewKmerIterator(s, lh.K)
 	if err != nil {
 		return nil, nil, err

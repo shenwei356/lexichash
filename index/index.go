@@ -339,6 +339,7 @@ func (idx *Index) BatchInsert() (chan *RefSeq, chan int) {
 								//  ref idx: 26 bits
 								//  pos:     36 bits
 								//  strand:   2 bits
+								// here, the location already contain the strand information from Mask().
 								refpos = uint64(refIdx)<<38 | uint64(loc)
 								trees[i].Insert(kmer, refpos)
 							}
