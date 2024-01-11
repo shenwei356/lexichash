@@ -575,7 +575,12 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 			if err != nil {
 				return nil, err
 			}
-			if cr == nil || cr.AlignedFraction < minAF || cr.Identity < minIdent {
+			if cr == nil {
+				twobit.RecycleTwoBit(tSeq)
+				continue
+			}
+			if cr.AlignedFraction < minAF || cr.Identity < minIdent {
+				RecycleSeqComparatorResult(cr)
 				twobit.RecycleTwoBit(tSeq)
 				continue
 			}
