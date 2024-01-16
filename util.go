@@ -20,14 +20,6 @@
 
 package lexichash
 
-import (
-	"github.com/shenwei356/kmers"
-)
-
-func Kmer2dna(code uint64, k int) []byte {
-	return kmers.Decode(code, k)
-}
-
 var bit2base = [4]byte{'A', 'C', 'G', 'T'}
 
 // MustDecoder returns a Decode function, which reuses the byte slice
@@ -67,7 +59,7 @@ func MustDecode(code uint64, k uint8) []byte {
 // Strands could be used to output strand for a reverse complement flag
 var Strands = [2]byte{'+', '-'}
 
-// IsLowComplexity check if a k-mer is of low-complexity.
+// IsLowComplexity checks if a k-mer is of low-complexity.
 func IsLowComplexity(code uint64, k int) bool {
 	bases := MustDecode(code, uint8(k))
 

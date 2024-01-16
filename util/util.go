@@ -35,6 +35,7 @@ func Hash64(key uint64) uint64 {
 	return key
 }
 
+// UniqUint64s removes duplicates in a uint64 list
 func UniqUint64s(list *[]uint64) {
 	if len(*list) == 0 || len(*list) == 1 {
 		return
@@ -67,7 +68,7 @@ func UniqUint64s(list *[]uint64) {
 	}
 }
 
-// ReverseInts reverse a list of ints
+// ReverseInts reverses a list of ints
 func ReverseInts(s []int) {
 	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
 		s[i], s[j] = s[j], s[i]

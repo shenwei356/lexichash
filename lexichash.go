@@ -48,10 +48,10 @@ type LexicHash struct {
 	// m3 means using the first 3 bases as the map keys,
 	// Three has the best balance in tests using 5000 and 10000 masks,
 	// smaller or bigger values would slow down the speed significantly.
-	m1 []*[]int
-	m2 []*[]int
 	m3 []*[]int
-	// pool for checking masks without matches
+	// pool for checking masks without matches.
+	// sync.Pool is used because Mask() method might be called concurrently.
+	// the object is recycled in Mask().
 	poolList *sync.Pool
 
 	// pools for storing Kmers and Locs in Mask().
@@ -135,7 +135,7 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	nPrefix--
 	n := 1 << (nPrefix << 1)
 	var bases []uint64
-	if checkLC && nPrefix >= 5 { // filter out k-mer with a prefixe of AAAAA, CCCCC, GGGGG or TTTTT
+	if checkLC && nPrefix >= 5 { // filter out k-mer with a prefix of AAAAA, CCCCC, GGGGG or TTTTT
 		bases = make([]uint64, 0, n)
 		for i := 0; i < n; i++ {
 			if IsLowComplexity(uint64(i), nPrefix) {
@@ -223,30 +223,6 @@ func (lh *LexicHash) indexMasks() {
 		}
 	}
 	lh.m3 = m
-
-	// 2
-	m = make([]*[]int, 1<<(2<<1))
-	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 2) << 1)
-		if list = m[prefix]; list == nil {
-			m[prefix] = &[]int{i}
-		} else {
-			*list = append(*list, i)
-		}
-	}
-	lh.m2 = m
-
-	// 1
-	m = make([]*[]int, 1<<(1<<1))
-	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 1) << 1)
-		if list = m[prefix]; list == nil {
-			m[prefix] = &[]int{i}
-		} else {
-			*list = append(*list, i)
-		}
-	}
-	lh.m1 = m
 }
 
 // RecycleMaskResult recycles the results of Mask().
@@ -268,9 +244,34 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 //     flag (1 for negative strand).
 //
 // skipRegions is optional, which is used to skip some masked regions.
+// E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
+// where need to be ommitted.
+//
 // The regions should be 0-based and ascendingly sorted.
 // e.g., [100, 130], [200, 230] ...
 func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
+	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
+	for i := range *hashes {
+		(*hashes)[i] = math.MaxUint64
+	}
+
+	masks := lh.Masks
+	k := lh.K
+	var mask, hash, h uint64
+	var kmer, kmerRC uint64
+	var ok bool
+	var i, j, js int
+	var locs *[]int
+
+	nRegions := len(skipRegions)
+	checkRegion := nRegions > 0
+	var ri, rs, re int
+
+	// -----------------------------------------------------------------------------
+	// round 1: fast locating of mask to compare with prefix indexing
+
 	// This k-mer iterator is a simplified version of
 	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
 	iter, err := iterator.NewKmerIterator(s, lh.K)
@@ -278,27 +279,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		return nil, nil, err
 	}
 
-	masks := lh.Masks
-	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
-	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
-	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	for i := range *hashes {
-		(*hashes)[i] = math.MaxUint64
-	}
-	var mask, hash, h uint64
-	var kmer, kmerRC uint64
-	var ok bool
-	var i, j, js int
-	var locs *[]int
-
-	k := lh.K
 	m3 := lh.m3
-	m2 := lh.m2
-	m1 := lh.m1
-	var maskIdxs *[]int
-
-	checkRegion := len(skipRegions) > 0
-	var ri, rs, re int
 
 	if checkRegion {
 		ri = 0
@@ -321,7 +302,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 			if j <= re { // in the region
 				if j == re { // update region to check
 					ri++
-					if ri == len(skipRegions) { // this is already the last one
+					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
 						rs, re = skipRegions[ri][0], skipRegions[ri][1]
@@ -336,15 +317,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		// ---------- positive strand ----------
 
-		maskIdxs = m3[int(kmer>>((k-3)<<1))]
-		if maskIdxs == nil {
-			maskIdxs = m2[int(kmer>>((k-2)<<1))]
-			if maskIdxs == nil {
-				maskIdxs = m1[int(kmer>>((k-1)<<1))]
-			}
-		}
-
-		for _, i = range *maskIdxs {
+		for _, i = range *m3[int(kmer>>((k-3)<<1))] {
 			mask = masks[i]
 			h = (*hashes)[i]
 
@@ -371,15 +344,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		js |= 1 // add the strand flag to the location
 
-		maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
-		if maskIdxs == nil {
-			maskIdxs = m2[int(kmerRC>>((k-2)<<1))]
-			if maskIdxs == nil {
-				maskIdxs = m1[int(kmerRC>>((k-1)<<1))]
-			}
-		}
-
-		for _, i = range *maskIdxs {
+		for _, i = range *m3[int(kmerRC>>((k-3)<<1))] {
 			mask = masks[i]
 			h = (*hashes)[i]
 
@@ -403,10 +368,10 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		}
 	}
 
-	// -------------------------------------------------
-	// some masks may do not have any matches,
-	// use the classic method for them, i.e., compare with all
-	// masks one by one.
+	// -----------------------------------------------------------------------------
+	// round 2.
+	// some masks may not have any matches,
+	// use the classic method for them, i.e., compare with all left masks one by one.
 
 	noMatches := lh.poolList.Get().(*[]int)
 	*noMatches = (*noMatches)[:0]
@@ -422,6 +387,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		return _kmers, locses, nil
 	}
 
+	// don't worry the efficiency, NewKmerIterator is optimized to reuse objects
 	iter, _ = iterator.NewKmerIterator(s, lh.K)
 
 	if checkRegion {
@@ -446,7 +412,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 			if j <= re { // in the region
 				if j == re { // update region to check
 					ri++
-					if ri == len(skipRegions) { // this is already the last one
+					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
 						rs, re = skipRegions[ri][0], skipRegions[ri][1]
@@ -511,6 +477,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		}
 	}
 
+	// recycle some reusable objects
 	lh.poolHashes.Put(hashes)
 	lh.poolList.Put(noMatches)
 	return _kmers, locses, nil

@@ -22,10 +22,10 @@ package util
 
 var offsets = []uint8{56, 48, 40, 32, 24, 16, 8, 0}
 
-// PutUint64s endcodes two uint64s into 2-16 bytes, and returns control byte
+// PutUint64s encodes two uint64s into 2-16 bytes, and returns control byte
 // and encoded byte length.
 func PutUint64s(buf []byte, v1, v2 uint64) (ctrl byte, n int) {
-	blen := byteLength(v1)
+	blen := ByteLength(v1)
 	ctrl |= byte(blen - 1)
 	for _, offset := range offsets[8-blen:] {
 		buf[n] = byte((v1 >> offset) & 0xff)
@@ -33,7 +33,7 @@ func PutUint64s(buf []byte, v1, v2 uint64) (ctrl byte, n int) {
 	}
 
 	ctrl <<= 3
-	blen = byteLength(v2)
+	blen = ByteLength(v2)
 	ctrl |= byte(blen - 1)
 	for _, offset := range offsets[8-blen:] {
 		buf[n] = byte((v2 >> offset) & 0xff)
@@ -42,7 +42,7 @@ func PutUint64s(buf []byte, v1, v2 uint64) (ctrl byte, n int) {
 	return
 }
 
-// Uint64s decode from encoded bytes
+// Uint64s decodes encoded bytes.
 func Uint64s(ctrl byte, buf []byte) (values [2]uint64, n int) {
 	blens := CtrlByte2ByteLengths[ctrl]
 	if len(buf) < int(blens[0]+blens[1]) {
@@ -59,7 +59,8 @@ func Uint64s(ctrl byte, buf []byte) (values [2]uint64, n int) {
 	return
 }
 
-func byteLength(n uint64) uint8 {
+// ByteLength returns the minimum number of bytes to store a integer.
+func ByteLength(n uint64) uint8 {
 	if n < 256 {
 		return 1
 	}
@@ -84,6 +85,7 @@ func byteLength(n uint64) uint8 {
 	return 8
 }
 
+// CtrlByte2ByteLengths is a table for query byte lenghts from the control byte.
 var CtrlByte2ByteLengths = [64][2]uint8{
 	{1, 1}, // 0, 0b000000
 	{1, 2},
