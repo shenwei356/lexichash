@@ -20,6 +20,19 @@
 
 package lexichash
 
+// https://gist.github.com/badboy/6267743 .
+// version with mask: https://gist.github.com/lh3/974ced188be2f90422cc .
+func Hash64(key uint64) uint64 {
+	key = (^key) + (key << 21) // key = (key << 21) - key - 1
+	key = key ^ (key >> 24)
+	key = (key + (key << 3)) + (key << 8) // key * 265
+	key = key ^ (key >> 14)
+	key = (key + (key << 2)) + (key << 4) // key * 21
+	key = key ^ (key >> 28)
+	key = key + (key << 31)
+	return key
+}
+
 var bit2base = [4]byte{'A', 'C', 'G', 'T'}
 
 // MustDecoder returns a Decode function, which reuses the byte slice

@@ -27,7 +27,6 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash/iterator"
-	"github.com/shenwei356/lexichash/util"
 	"github.com/twotwotwo/sorts/sortutil"
 )
 
@@ -139,7 +138,6 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 		bases = make([]uint64, 0, n)
 		for i := 0; i < n; i++ {
 			if IsLowComplexity(uint64(i), nPrefix) {
-				// fmt.Printf("%s\n", kmers.Decode(uint64(i), nPrefix))
 				continue
 			}
 			bases = append(bases, uint64(i))
@@ -173,12 +171,11 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	var tries int
 	for {
 		v = r.Uint64()
-		mask = util.Hash64(v)&_mask | masks[i]<<shiftP
+		mask = Hash64(v)&_mask | masks[i]<<shiftP
 
 		if checkLC {
 			prefix = mask >> ((k - p) << 1)
 			if IsLowComplexity(prefix, p) {
-				// fmt.Printf("%d, %s\n", i, MustDecode(prefix, uint8(p)))
 				tries++
 				if tries <= 10 {
 					continue
