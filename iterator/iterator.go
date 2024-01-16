@@ -63,7 +63,6 @@ type Iterator struct {
 	codeBase  uint64
 	preCode   uint64
 	preCodeRC uint64
-	codeRC    uint64
 
 	mask1 uint64 // (1<<(kP1Uint*2))-1
 	mask2 uint   // iter.kP1Uint*2
@@ -98,8 +97,8 @@ func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 }
 
 // NextKmer returns next two k-mer codes.
-// code is for the positive strand,
-// codeRC is for the negative strand.
+// code is from the positive strand,
+// codeRC is from the negative strand.
 func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	if iter.finished {
 		return 0, 0, false, nil

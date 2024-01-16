@@ -27,6 +27,7 @@ import (
 
 	"github.com/shenwei356/lexichash/index/twobit"
 	"github.com/shenwei356/lexichash/tree"
+	"github.com/shenwei356/lexichash/util"
 )
 
 // SearchOptions defineds options used in searching.
@@ -365,7 +366,7 @@ func (idx *Index) Search(s []byte) (*[]*SearchResult, error) {
 				}
 
 				// matched
-				code = tree.KmerPrefix(sr.Kmer, K8, sr.LenPrefix)
+				code = util.KmerPrefix(sr.Kmer, K8, sr.LenPrefix)
 
 				// multiple locations for each MATCHED k-mer
 				// but most of cases, there's only one.

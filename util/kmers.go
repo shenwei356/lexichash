@@ -18,13 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package tree
+package util
 
-import (
-	"math/bits"
-)
-
-var bit2base = [4]byte{'A', 'C', 'G', 'T'}
+import "math/bits"
 
 // KmerBaseAt returns the base in pos i (0-based).
 func KmerBaseAt(code uint64, k uint8, i uint8) uint8 {
@@ -47,16 +43,23 @@ func KmerSuffix(code uint64, k uint8, i uint8) uint64 {
 func KmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
 	var d uint8
 	if k1 >= k2 { // most of the cases
-		code1 = code1 >> ((k1 - k2) << 1)
+		code1 >>= ((k1 - k2) << 1)
 		d = 32 - k2
 	} else {
-		code2 = code2 >> ((k2 - k1) << 1)
+		code2 >>= ((k2 - k1) << 1)
 		d = 32 - k1
 	}
 	return uint8(bits.LeadingZeros64(code1^code2)>>1) - d
 }
 
-// KmerHasPrefix check if a k-mer has a prefix
+// MustKmerLongestPrefix returns the length of the longest prefix.
+// We assume k1 >= k2.
+func MustKmerLongestPrefix(code1, code2 uint64, k1, k2 uint8) uint8 {
+	code1 >>= ((k1 - k2) << 1)
+	return uint8(bits.LeadingZeros64(code1^code2)>>1) + k2 - 32
+}
+
+// KmerHasPrefix checks if a k-mer has a prefix.
 func KmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	if k1 < k2 {
 		return false
@@ -64,7 +67,7 @@ func KmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
 }
 
-// MustKmerHasPrefix check if a k-mer has a prefix, without if branch.
+// MustKmerHasPrefix checks if a k-mer has a prefix, by assuming k1>=k2.
 func MustKmerHasPrefix(code uint64, prefix uint64, k1, k2 uint8) bool {
 	return code>>((k1-k2)<<1) == prefix
 }

@@ -479,7 +479,7 @@ func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 
 		// Look for the child
 		parent = n
-		firstBase := KmerBaseAt(search, k, 0)
+		firstBase := util.KmerBaseAt(search, k, 0)
 		n = n.children[firstBase]
 
 		// No child, create one
@@ -504,11 +504,11 @@ func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 		// Determine longest prefix of the search key on match
 		// commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
 		// because k >= n.k
-		commonPrefix := MustKmerLongestPrefix(search, n.prefix, k, n.k)
+		commonPrefix := util.MustKmerLongestPrefix(search, n.prefix, k, n.k)
 		// the new key is longer than key of n, continue to search. len(prefix) = len(n)
 		if commonPrefix == n.k {
-			search = KmerSuffix(search, k, commonPrefix) // left bases
-			k = k - commonPrefix                         // need to update it
+			search = util.KmerSuffix(search, k, commonPrefix) // left bases
+			k = k - commonPrefix                              // need to update it
 			continue
 		}
 
@@ -516,16 +516,16 @@ func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 		// Split the node n
 		child := &node{
 			// o---<=8, here the prefix of one of the 8 is ---,
-			prefix: KmerPrefix(search, k, commonPrefix),
+			prefix: util.KmerPrefix(search, k, commonPrefix),
 			k:      commonPrefix,
 		}
 		t.numNodes++
 		parent.children[firstBase] = child // change from n to c
 
 		// child points to n now
-		child.children[KmerBaseAt(n.prefix, n.k, commonPrefix)] = n
+		child.children[util.KmerBaseAt(n.prefix, n.k, commonPrefix)] = n
 		child.numChildren++
-		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
+		n.prefix = util.KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
 		// Create a new leaf node for the new key
@@ -536,7 +536,7 @@ func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 		t.numLeafNodes++
 
 		// the new key is a prefix of the old n, add the leaf node to this node. len(new) = len(prefix)
-		search = KmerSuffix(search, k, commonPrefix)
+		search = util.KmerSuffix(search, k, commonPrefix)
 		k = k - commonPrefix
 		if k == 0 {
 			child.leaf = leaf
@@ -545,7 +545,7 @@ func (t *Tree) insertKeyVals(key uint64, v []uint64) bool {
 
 		// the new key and the key of node n share a prefix shorter than both of them
 		// Create a new child node for the node
-		child.children[KmerBaseAt(search, k, 0)] = &node{
+		child.children[util.KmerBaseAt(search, k, 0)] = &node{
 			leaf:   leaf,
 			prefix: search,
 			k:      k,

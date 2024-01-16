@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/shenwei356/lexichash"
+	"github.com/shenwei356/lexichash/util"
 )
 
 // leafNode is used to represent a value.
@@ -114,7 +115,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 
 		// Look for the child
 		parent = n
-		firstBase := KmerBaseAt(search, k, 0)
+		firstBase := util.KmerBaseAt(search, k, 0)
 		n = n.children[firstBase]
 
 		// No child, create one
@@ -139,11 +140,11 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 		// Determine longest prefix of the search key on match
 		// commonPrefix := KmerLongestPrefix(search, n.prefix, k, n.k)
 		// because k >= n.k
-		commonPrefix := MustKmerLongestPrefix(search, n.prefix, k, n.k)
+		commonPrefix := util.MustKmerLongestPrefix(search, n.prefix, k, n.k)
 		// the new key is longer than key of n, continue to search. len(prefix) = len(n)
 		if commonPrefix == n.k {
-			search = KmerSuffix(search, k, commonPrefix) // left bases
-			k = k - commonPrefix                         // need to update it
+			search = util.KmerSuffix(search, k, commonPrefix) // left bases
+			k = k - commonPrefix                              // need to update it
 			continue
 		}
 
@@ -151,16 +152,16 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 		// Split the node n
 		child := &node{
 			// o---<=8, here the prefix of one of the 8 is ---,
-			prefix: KmerPrefix(search, k, commonPrefix),
+			prefix: util.KmerPrefix(search, k, commonPrefix),
 			k:      commonPrefix,
 		}
 		t.numNodes++
 		parent.children[firstBase] = child // change from n to c
 
 		// child points to n now
-		child.children[KmerBaseAt(n.prefix, n.k, commonPrefix)] = n
+		child.children[util.KmerBaseAt(n.prefix, n.k, commonPrefix)] = n
 		child.numChildren++
-		n.prefix = KmerSuffix(n.prefix, n.k, commonPrefix)
+		n.prefix = util.KmerSuffix(n.prefix, n.k, commonPrefix)
 		n.k = n.k - commonPrefix
 
 		// Create a new leaf node for the new key
@@ -171,7 +172,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 		t.numLeafNodes++
 
 		// the new key is a prefix of the old n, add the leaf node to this node. len(new) = len(prefix)
-		search = KmerSuffix(search, k, commonPrefix)
+		search = util.KmerSuffix(search, k, commonPrefix)
 		k = k - commonPrefix
 		if k == 0 {
 			child.leaf = leaf
@@ -180,7 +181,7 @@ func (t *Tree) Insert(key uint64, v uint64) bool {
 
 		// the new key and the key of node n share a prefix shorter than both of them
 		// Create a new child node for the node
-		child.children[KmerBaseAt(search, k, 0)] = &node{
+		child.children[util.KmerBaseAt(search, k, 0)] = &node{
 			leaf:   leaf,
 			prefix: search,
 			k:      k,
@@ -207,14 +208,14 @@ func (t *Tree) Get(key uint64) ([]uint64, bool) {
 		}
 
 		// Look for a child
-		n = n.children[KmerBaseAt(search, k, 0)]
+		n = n.children[util.KmerBaseAt(search, k, 0)]
 		if n == nil { // not found
 			break
 		}
 
 		// Consume the search prefix
-		if KmerHasPrefix(search, n.prefix, k, n.k) {
-			search = KmerSuffix(search, k, n.k)
+		if util.KmerHasPrefix(search, n.prefix, k, n.k) {
+			search = util.KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
 			break
@@ -250,16 +251,16 @@ func (t *Tree) Path(key uint64, minPrefix uint8) (*[]string, uint8) {
 		}
 
 		// Look for a child
-		n = n.children[KmerBaseAt(search, k, 0)]
+		n = n.children[util.KmerBaseAt(search, k, 0)]
 		if n == nil { // not found
 			break
 		}
 
 		// Consume the search prefix
-		if KmerHasPrefix(search, n.prefix, k, n.k) {
+		if util.KmerHasPrefix(search, n.prefix, k, n.k) {
 			matched += n.k
 			*nodes = append(*nodes, string(lexichash.MustDecode(n.prefix, n.k)))
-			search = KmerSuffix(search, k, n.k)
+			search = util.KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
 			// also check the prefix, because the prefix of some nodes
@@ -270,7 +271,7 @@ func (t *Tree) Path(key uint64, minPrefix uint8) (*[]string, uint8) {
 			//   A C AGGC
 			// matched += KmerLongestPrefix(search, n.prefix, k, n.k)
 			// because k >= n.k
-			matched += MustKmerLongestPrefix(search, n.prefix, k, n.k)
+			matched += util.MustKmerLongestPrefix(search, n.prefix, k, n.k)
 			if matched >= minPrefix {
 				*nodes = append(*nodes, string(lexichash.MustDecode(n.prefix, n.k)))
 				break
@@ -330,7 +331,7 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 		}
 
 		// Look for a child
-		n = n.children[KmerBaseAt(search, k, 0)]
+		n = n.children[util.KmerBaseAt(search, k, 0)]
 		if n == nil {
 			break
 		}
@@ -339,7 +340,7 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 		// if KmerHasPrefix(search, n.prefix, k, n.k) {
 		// if search>>((k-n.k)<<1) == n.prefix { // manually inline code
 		// this line is slow, because of RAM access of node information (cache miss)
-		if MustKmerHasPrefix(search, n.prefix, k, n.k) {
+		if util.MustKmerHasPrefix(search, n.prefix, k, n.k) {
 			lenPrefix += n.k
 			// already matched at least m bases
 			// we can output all leaves below n
@@ -348,7 +349,7 @@ func (t *Tree) Search(key uint64, m uint8) (*[]*SearchResult, bool) {
 				break
 			}
 
-			search = KmerSuffix(search, k, n.k)
+			search = util.KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
 			// also check the prefix, because the prefix of some nodes
@@ -417,14 +418,14 @@ func (t *Tree) LongestPrefix(key uint64) (uint64, []uint64, bool) {
 		}
 
 		// Look for a child
-		n = n.children[KmerBaseAt(search, k, 0)]
+		n = n.children[util.KmerBaseAt(search, k, 0)]
 		if n == nil {
 			break
 		}
 
 		// Consume the search prefix
-		if KmerHasPrefix(search, n.prefix, k, n.k) {
-			search = KmerSuffix(search, k, n.k)
+		if util.KmerHasPrefix(search, n.prefix, k, n.k) {
+			search = util.KmerSuffix(search, k, n.k)
 			k = k - n.k
 		} else {
 			break

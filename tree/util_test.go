@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/shenwei356/kmers"
+	"github.com/shenwei356/lexichash/util"
 )
 
 func parseKmer(s string) ([]byte, uint64, uint8) {
@@ -43,7 +44,7 @@ func TestKmerOperations(t *testing.T) {
 	// KmerBaseAt
 	var c uint8
 	for i, b := range kmer {
-		c = KmerBaseAt(code, k, uint8(i))
+		c = util.KmerBaseAt(code, k, uint8(i))
 		if bit2base[c] != b {
 			t.Errorf("KmerBaseAt error: %d, expected %c, returned %c", i, b, c)
 		}
@@ -52,7 +53,7 @@ func TestKmerOperations(t *testing.T) {
 	// KmerPrefix
 	var p []byte
 	for i := 1; i <= len(kmer); i++ {
-		p = kmers.MustDecode(KmerPrefix(code, k, uint8(i)), i)
+		p = kmers.MustDecode(util.KmerPrefix(code, k, uint8(i)), i)
 		if !bytes.Equal(p, kmer[:i]) {
 			t.Errorf("KmerPrefix error: %d, expected %s, returned %s", i, kmer[:i], p)
 		}
@@ -61,31 +62,31 @@ func TestKmerOperations(t *testing.T) {
 	// KmerSuffix
 	var s []byte
 	for i := 0; i < len(kmer); i++ {
-		s = kmers.MustDecode(KmerSuffix(code, k, uint8(i)), len(kmer)-i)
+		s = kmers.MustDecode(util.KmerSuffix(code, k, uint8(i)), len(kmer)-i)
 		if !bytes.Equal(s, kmer[i:]) {
 			t.Errorf("KmerSuffix error: %d, expected %s, returned %s", i, kmer[i:], s)
 		}
 	}
 
 	// KmerLongestPrefix
-	n := KmerLongestPrefix(p1, p2, k1, k2)
+	n := util.KmerLongestPrefix(p1, p2, k1, k2)
 	if n != 5 {
 		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 5, n)
 	}
 
-	n = KmerLongestPrefix(p2, p1, k2, k1)
+	n = util.KmerLongestPrefix(p2, p1, k2, k1)
 	if n != 5 {
 		t.Errorf("KmerLongestPrefix error: expected %d, returned %d", 5, n)
 	}
 
 	// KmerHasPrefix
-	b := KmerHasPrefix(code, p1, k, k1)
+	b := util.KmerHasPrefix(code, p1, k, k1)
 	has := bytes.HasPrefix(kmer, prefix1)
 	if b != has {
 		t.Errorf("KmerHasPrefix error: expected %v, returned %v", has, b)
 	}
 
-	b = KmerHasPrefix(code, p2, k, k2)
+	b = util.KmerHasPrefix(code, p2, k, k2)
 	has = bytes.HasPrefix(kmer, prefix2)
 	if b != has {
 		t.Errorf("KmerHasPrefix error: expected %v, returned %v", has, b)

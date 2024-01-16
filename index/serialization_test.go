@@ -51,7 +51,7 @@ func TestSerialization(t *testing.T) {
 
 	seq.ValidateSeq = false
 	var record *fastx.Record
-	fastxReader, err := fastx.NewReader(nil, "../test_data/hairpin.fasta", "")
+	fastxReader, err := fastx.NewReader(nil, "test_data/hairpin.fasta", "")
 	if err != nil {
 		t.Error(err)
 		return
@@ -129,7 +129,7 @@ func TestSerialization(t *testing.T) {
 
 	// ---------------------------------------------------
 
-	queries, err := fastx.GetSeqs("../test_data/hairpin.query.fasta", nil, 8, 100, "")
+	queries, err := fastx.GetSeqs("test_data/hairpin.query.fasta", nil, 8, 100, "")
 	if err != nil {
 		t.Error(err)
 		return
