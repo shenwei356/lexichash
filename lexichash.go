@@ -24,10 +24,10 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"sort"
 	"sync"
 
 	"github.com/shenwei356/lexichash/iterator"
-	"github.com/twotwotwo/sorts/sortutil"
 )
 
 // ErrKOverflow means K > 32.
@@ -198,7 +198,7 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	}
 
 	// sort
-	sortutil.Uint64s(masks)
+	sort.Slice(masks, func(i, j int) bool { return masks[i] < masks[j] })
 
 	return masks
 }

@@ -21,12 +21,12 @@
 package lexichash
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"sync"
-
-	"github.com/shenwei356/xopen"
 )
 
 var be = binary.BigEndian
@@ -47,25 +47,35 @@ var ErrVersionMismatch = errors.New("lexichash: version mismatch")
 
 // NewFromFile creates a LexicHash from a file.
 func NewFromFile(file string) (*LexicHash, error) {
-	fh, err := xopen.Ropen(file)
+	fh, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
-	defer fh.Close()
 
-	return Read(fh)
+	lh, err := Read(bufio.NewReader(fh))
+	if err != nil {
+		return nil, err
+	}
+
+	return lh, fh.Close()
 }
 
 // WriteToFile writes a LexicHash to a file,
 // optional with file extensions of .gz, .xz, .zst, .bz2.
 func (lh *LexicHash) WriteToFile(file string) (int, error) {
-	outfh, err := xopen.Wopen(file)
+	fh, err := os.Create(file)
 	if err != nil {
 		return 0, err
 	}
-	defer outfh.Close()
 
-	return lh.Write(outfh)
+	bw := bufio.NewWriter(fh)
+	n, err := lh.Write(bw)
+	if err != nil {
+		return n, err
+	}
+
+	bw.Flush()
+	return n, fh.Close()
 }
 
 // Write writes a LexicHash.
