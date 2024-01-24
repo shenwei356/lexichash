@@ -124,6 +124,9 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	masks := make([]uint64, nMasks)
 	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
 	r := rand.New(rand.NewSource(randSeed))
+	if p > k {
+		p = k
+	}
 	checkLC := p > 0
 
 	// generate 4^x prefix
