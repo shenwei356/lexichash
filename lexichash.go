@@ -240,7 +240,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // It returns
 //
 //  1. the list of the most similar k-mers for each mask.
-//  2. the start 0-based positions of all k-mers, with the last 2 bits as the strand
+//  2. the start 0-based positions of all k-mers, with the last 1 bit as the strand
 //     flag (1 for negative strand).
 //
 // skipRegions is optional, which is used to skip some masked regions.
@@ -313,7 +313,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 			}
 		}
 
-		js = j << 2
+		js = j << 1
 
 		// ---------- positive strand ----------
 
@@ -422,7 +422,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 			}
 		}
 
-		js = j << 2
+		js = j << 1
 
 		// ---------- positive strand ----------
 
