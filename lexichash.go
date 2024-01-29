@@ -22,6 +22,7 @@ package lexichash
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sort"
@@ -31,10 +32,10 @@ import (
 )
 
 // ErrKOverflow means K > 32.
-var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [3-32]")
+var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [5-32]")
 
 // ErrInsufficientMasks means the number of masks is too small.
-var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=4)")
+var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=64)")
 
 // LexicHash is for finding shared substrings between nucleotide sequences.
 type LexicHash struct {
@@ -44,10 +45,13 @@ type LexicHash struct {
 	Masks []uint64 // masks/k-mers
 
 	// indexes for fast locating masks to compare.
-	// m3 means using the first 3 bases as the map keys,
-	// Three has the best balance in tests using 5000 and 10000 masks,
-	// smaller or bigger values would slow down the speed significantly.
+	// m3 means using the first 3 bases as the map keys.
+	// for long sequence, e.g., > 1Mb, any 5-bp prefix probably has some matches.
+	// while for short sequences, we use a 3-bp prefix for fast locating.
+	// For masks > 64, 3-bp prefix must have a match.
 	m3 []*[]int
+	m5 []*[]int
+
 	// pool for checking masks without matches.
 	// sync.Pool is used because Mask() method might be called concurrently.
 	// the object is recycled in Mask().
@@ -64,8 +68,8 @@ type LexicHash struct {
 }
 
 // New returns a new LexicHash object.
-// nMasks better be >= 1024 and better be power of 4,
-// i.e., 4, 16, 64, 256, 1024, 4096 ...
+// nMasks should be >=64, and better be >= 1024 and better be power of 4,
+// i.e., 64, 256, 1024, 4096 ...
 // p is the length of mask k-mer prefixes which need to be checked for low-complexity.
 // p == 0 for no checking.
 func New(k int, nMasks int, p int) (*LexicHash, error) {
@@ -81,7 +85,7 @@ func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
 	if k < 3 || k > 32 {
 		return nil, ErrKOverflow
 	}
-	if nMasks < 4 {
+	if nMasks < 64 { // 4*4*4 = 64
 		return nil, ErrInsufficientMasks
 	}
 
@@ -223,6 +227,19 @@ func (lh *LexicHash) indexMasks() {
 		}
 	}
 	lh.m3 = m
+
+	// 5
+	m = make([]*[]int, 1<<(5<<1))
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - 5) << 1)
+		if list = m[prefix]; list == nil {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.m5 = m
+
 }
 
 // RecycleMaskResult recycles the results of Mask().
@@ -345,6 +362,258 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		js |= 1 // add the strand flag to the location
 
 		for _, i = range *m3[int(kmerRC>>((k-3)<<1))] {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+	}
+
+	// -----------------------------------------------------------------------------
+	// round 2.
+	// some masks may not have any matches,
+	// use the classic method for them, i.e., compare with all left masks one by one.
+
+	noMatches := lh.poolList.Get().(*[]int)
+	*noMatches = (*noMatches)[:0]
+	for i, h := range *hashes {
+		if h == math.MaxUint64 {
+			*noMatches = append(*noMatches, i)
+		}
+	}
+
+	if len(*noMatches) == 0 { // cool, no need to continue
+		lh.poolList.Put(noMatches)
+		lh.poolHashes.Put(hashes)
+		return _kmers, locses, nil
+	}
+
+	// don't worry the efficiency, NewKmerIterator is optimized to reuse objects
+	iter, _ = iterator.NewKmerIterator(s, lh.K)
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+	}
+
+	for {
+		kmer, kmerRC, ok, _ = iter.NextKmer()
+		if !ok {
+			break
+		}
+
+		if kmer == 0 { // all bases are A's or N's.
+			continue
+		}
+
+		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == nRegions { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+					}
+				}
+				continue
+			}
+		}
+
+		js = j << 1
+
+		// ---------- positive strand ----------
+
+		for _, i = range *noMatches {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmer ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmer
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		for _, i = range *noMatches {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+	}
+
+	// recycle some reusable objects
+	lh.poolHashes.Put(hashes)
+	lh.poolList.Put(noMatches)
+	return _kmers, locses, nil
+}
+
+// MaskLongSeqs is faster than Mask() for longer sequences, requiring nMasks >= 1024.
+func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+	if len(lh.Masks) < 1024 {
+		return nil, nil, fmt.Errorf("MaskLongSeqs is not support for masks < 1024")
+	}
+
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
+	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
+	for i := range *hashes {
+		(*hashes)[i] = math.MaxUint64
+	}
+
+	masks := lh.Masks
+	k := lh.K
+	var mask, hash, h uint64
+	var kmer, kmerRC uint64
+	var ok bool
+	var i, j, js int
+	var locs *[]int
+
+	nRegions := len(skipRegions)
+	checkRegion := nRegions > 0
+	var ri, rs, re int
+
+	// -----------------------------------------------------------------------------
+	// round 1: fast locating of mask to compare with prefix indexing
+
+	// This k-mer iterator is a simplified version of
+	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
+	iter, err := iterator.NewKmerIterator(s, lh.K)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	m3 := lh.m3
+	// m4 := lh.m4
+	m5 := lh.m5
+	var maskIdxs *[]int
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+	}
+
+	for {
+		kmer, kmerRC, ok, _ = iter.NextKmer()
+		if !ok {
+			break
+		}
+		if kmer == 0 { // all bases are A's or N's.
+			continue
+		}
+
+		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == nRegions { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+					}
+				}
+
+				continue
+			}
+		}
+
+		js = j << 1
+
+		// ---------- positive strand ----------
+
+		maskIdxs = m5[int(kmer>>((k-5)<<1))]
+		if maskIdxs == nil {
+			maskIdxs = m3[int(kmer>>((k-3)<<1))]
+		}
+
+		for _, i = range *maskIdxs {
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmer ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmer
+			} else {
+				*locs = append(*locs, js)
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		maskIdxs = m5[int(kmerRC>>((k-5)<<1))]
+		if maskIdxs == nil {
+			maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
+		}
+
+		for _, i = range *maskIdxs {
 			mask = masks[i]
 			h = (*hashes)[i]
 
