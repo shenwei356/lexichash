@@ -21,8 +21,11 @@
 package lexichash
 
 import (
+	"fmt"
 	"os"
 	"testing"
+
+	"github.com/shenwei356/kmers"
 )
 
 func TestSerialization(t *testing.T) {
@@ -63,6 +66,65 @@ func TestSerialization(t *testing.T) {
 
 	if lh.Seed != lh2.Seed {
 		t.Errorf("seeds unmatched: %d vs %d", lh.Seed, lh2.Seed)
+		return
+	}
+
+	if len(lh.Masks) != len(lh2.Masks) {
+		t.Errorf("number of masks unmatched: %d vs %d", len(lh.Masks), len(lh2.Masks))
+		return
+	}
+
+	for i, m := range lh.Masks {
+		if m != lh2.Masks[i] {
+			t.Errorf("masks unmatched: %d vs %d", len(lh.Masks), len(lh2.Masks))
+			return
+		}
+	}
+
+	// ----------------------------------------
+
+	if os.RemoveAll(file) != nil {
+		t.Errorf("failed to remove the file: %s", file)
+		return
+	}
+}
+
+func TestSerialization2(t *testing.T) {
+	k := 21
+	nMasks := 1000
+	var seed int64 = 1
+
+	lh, err := NewWithSeed(k, nMasks, seed, 0)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	// ----------------------------------------
+
+	file := "masks.txt"
+
+	outfh, err := os.Create(file)
+	if err != nil {
+		t.Errorf("failed to write file: %s", file)
+		return
+	}
+	for _, mask := range lh.Masks {
+		fmt.Fprintf(outfh, "%s\n", kmers.MustDecode(mask, lh.K))
+	}
+
+	outfh.Close()
+
+	// ----------------------------------------
+
+	lh2, err := NewFromTextFile(file)
+	if err != nil {
+		t.Errorf("new LexicHash from a text file: %s", err)
+		return
+	}
+
+	if lh.K != lh2.K {
+		t.Errorf("Ks unmatched: %d vs %d", lh.K, lh2.K)
 		return
 	}
 

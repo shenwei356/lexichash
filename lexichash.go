@@ -21,13 +21,17 @@
 package lexichash
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"os"
 	"sort"
 	"sync"
 
+	"github.com/shenwei356/kmers"
 	"github.com/shenwei356/lexichash/iterator"
 )
 
@@ -77,8 +81,8 @@ func New(k int, nMasks int, p int) (*LexicHash, error) {
 }
 
 // NewWithSeed creates a new LexicHash object with given seed.
-// nMasks better be >= 1024 and better be power of 4,
-// i.e., 4, 16, 64, 256, 1024, 4096 ...
+// nMasks should be >=64, and better be >= 1024 and better be power of 4,
+// i.e., 64, 256, 1024, 4096 ...
 // p is the length of mask k-mer prefixes which need to be checked for low-complexity.
 // p == 0 for no checking.
 func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
@@ -89,11 +93,39 @@ func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
 		return nil, ErrInsufficientMasks
 	}
 
-	lh := &LexicHash{K: k, Seed: randSeed}
-
-	// ------------ generate masks ------------
-
 	masks := genRandomMasks(k, nMasks, randSeed, p)
+
+	lh, err := NewWithMasks(k, masks)
+	if err != nil {
+		return lh, err
+	}
+
+	lh.Seed = randSeed
+	return lh, nil
+}
+
+// NewWithMasks creates a new LexicHash object with custom kmers.
+// nMasks should be >=64, and better be >= 1024 and better be power of 4,
+// i.e., 64, 256, 1024, 4096 ...
+func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
+	if k < 3 || k > 32 {
+		return nil, ErrKOverflow
+	}
+	if len(masks) < 64 { // 4*4*4 = 64
+		return nil, ErrInsufficientMasks
+	}
+	// checking mask
+	maxMask := 1<<(k<<1) - 1
+	for mask := range masks {
+		if mask > maxMask {
+			return nil, fmt.Errorf("lexichash: given invalid k-mer code for k=%d: %d", k, mask)
+		}
+	}
+
+	lh := &LexicHash{K: k}
+
+	// sort
+	sort.Slice(masks, func(i, j int) bool { return masks[i] < masks[j] })
 
 	lh.Masks = masks
 	lh.indexMasks()
@@ -121,6 +153,45 @@ func NewWithSeed(k int, nMasks int, randSeed int64, p int) (*LexicHash, error) {
 	}}
 
 	return lh, nil
+}
+
+// NewFromTextFile creates a new LexicHash object with custom kmers in a txt file.
+func NewFromTextFile(file string) (*LexicHash, error) {
+	fh, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+
+	masks := make([]uint64, 0, 1024)
+
+	scanner := bufio.NewScanner(fh)
+	var line []byte
+	var kmer uint64
+	var k int
+	for scanner.Scan() {
+		line = bytes.Trim(scanner.Bytes(), "\r\n")
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		if k == 0 {
+			k = len(line)
+		} else if k != len(line) {
+			return nil, fmt.Errorf("lexichash: inconsistent k-mer length: %d != %d, %s", k, len(line), line)
+		}
+
+		kmer, err = kmers.Encode(line)
+		if err != nil {
+			return nil, err
+		}
+
+		masks = append(masks, kmer)
+	}
+	if err = scanner.Err(); err != nil {
+		return nil, err
+	}
+	fh.Close()
+
+	return NewWithMasks(k, masks)
 }
 
 // p is the length of prefixes which need to be checked for low-complexity.

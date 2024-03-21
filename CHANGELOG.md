@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.3.0 - 2024-03-21
+
+- Add 2 methods (`NewWithMasks` and `NewFromTextFile`) for creating LexicHash with custom masks.
+
 ### v0.2.0 - 2024-01-29
 
 - Remove all code related to seed indexing and querying and minimize the dependencies.

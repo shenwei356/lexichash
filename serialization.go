@@ -45,7 +45,7 @@ var ErrBrokenFile = errors.New("lexichash: broken file")
 // ErrVersionMismatch means version mismatch between files and program.
 var ErrVersionMismatch = errors.New("lexichash: version mismatch")
 
-// NewFromFile creates a LexicHash from a file.
+// NewFromFile creates a LexicHash from a binary file.
 func NewFromFile(file string) (*LexicHash, error) {
 	fh, err := os.Open(file)
 	if err != nil {
