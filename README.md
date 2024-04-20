@@ -8,7 +8,7 @@ with high performance and a low memory footprint.
 ## Related projects
 
 - This package is used in [LexicMap](https://github.com/shenwei356/LexicMap).
-- Bit-packed k-mer operations is provided by [kmers](https://github.com/shenwei356/kmers).
+- Bit-packed k-mer operations are provided by [kmers](https://github.com/shenwei356/kmers).
 
 ## Support
 

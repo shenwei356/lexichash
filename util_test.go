@@ -32,6 +32,11 @@ func TestLowComplexity(t *testing.T) {
 		LowC bool
 	}
 	tests := []Case{
+		{"AAAAAAA", true},
+		{"CCCCCCC", true},
+		{"GGGGGGG", true},
+		{"TTTTTTT", true},
+
 		{"ACAACAACAACAACA", true},
 		{"ACAACAACAACAACG", true},
 		{"ACAACAACAACACCG", true},
