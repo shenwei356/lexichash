@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.4.0 - 2024-04-20
+
+- Add method `IndexMasks` and `MaskKnownPrefixes` for faster masking k-mers of which the prefixes are existed.
+
 ### v0.3.0 - 2024-03-21
 
 - Add 2 methods (`NewWithMasks` and `NewFromTextFile`) for creating LexicHash with custom masks.

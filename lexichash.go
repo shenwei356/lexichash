@@ -36,7 +36,10 @@ import (
 )
 
 // ErrKOverflow means K > 32.
-var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [5-32]")
+var ErrKOverflow = errors.New("lexichash: k-mer size overflow, valid range is [3-32]")
+
+// ErrPrefixOverflow means prefix > k.
+var ErrPrefixOverflow = errors.New("lexichash: prefix should be in range of [3, k]")
 
 // ErrInsufficientMasks means the number of masks is too small.
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=64)")
@@ -55,6 +58,9 @@ type LexicHash struct {
 	// For masks > 64, 3-bp prefix must have a match.
 	m3 []*[]int
 	m5 []*[]int
+
+	mN     map[uint64]*[]int // the length of the prefix is given by IndexMasks
+	prefix int               //
 
 	// pool for checking masks without matches.
 	// sync.Pool is used because Mask() method might be called concurrently.
@@ -205,17 +211,17 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	checkLC := p > 0
 
 	// generate 4^x prefix
-	nPrefix := 1
-	for 1<<(nPrefix<<1) <= nMasks {
-		nPrefix++
+	lenPrefix := 1
+	for 1<<(lenPrefix<<1) <= nMasks {
+		lenPrefix++
 	}
-	nPrefix--
-	n := 1 << (nPrefix << 1)
+	lenPrefix--
+	n := 1 << (lenPrefix << 1)
 	var bases []uint64
-	if checkLC && nPrefix >= 5 { // filter out k-mer with a prefix of AAAAA, CCCCC, GGGGG or TTTTT
+	if checkLC && lenPrefix >= 5 { // filter out k-mer with a prefix of AAAAA, CCCCC, GGGGG or TTTTT
 		bases = make([]uint64, 0, n)
 		for i := 0; i < n; i++ {
-			if IsLowComplexity(uint64(i), nPrefix) {
+			if IsLowComplexity(uint64(i), lenPrefix) {
 				continue
 			}
 			bases = append(bases, uint64(i))
@@ -239,8 +245,8 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	}
 
 	// concatenate with random numbers
-	var _mask uint64 = 1<<(uint64(k-nPrefix)<<1) - 1
-	shiftP := uint64(k-nPrefix) << 1
+	var _mask uint64 = 1<<(uint64(k-lenPrefix)<<1) - 1
+	shiftP := uint64(k-lenPrefix) << 1
 	var mask uint64
 	var v uint64
 	var i int
@@ -311,6 +317,32 @@ func (lh *LexicHash) indexMasks() {
 	}
 	lh.m5 = m
 
+}
+
+// IndexMasks creates a lookup table with the p-bp prefixes,
+// then you can use MaskKnownPrefixes() to masks k-mers of which the prefixes are existed.
+func (lh *LexicHash) IndexMasks(p int) error {
+	k := lh.K
+	if p < 3 || p > k {
+		return ErrPrefixOverflow
+	}
+
+	var prefix uint64
+	var list *[]int
+	var ok bool
+
+	m := make(map[uint64]*[]int, 1024)
+	for i, mask := range lh.Masks {
+		prefix = mask >> ((k - p) << 1)
+		if list, ok = m[prefix]; !ok {
+			m[prefix] = &[]int{i}
+		} else {
+			*list = append(*list, i)
+		}
+	}
+	lh.mN = m
+	lh.prefix = p
+	return nil
 }
 
 // RecycleMaskResult recycles the results of Mask().
@@ -568,6 +600,162 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	// recycle some reusable objects
 	lh.poolHashes.Put(hashes)
 	lh.poolList.Put(noMatches)
+	return _kmers, locses, nil
+}
+
+// MaskKnownPrefixes masks k-mers of which the prefixes are existed.
+// So you need to run IndexMasks first.
+//
+// It returns
+//
+//  1. the list of the most similar k-mers for each mask.
+//  2. the start 0-based positions of all k-mers, with the last 1 bit as the strand
+//     flag (1 for negative strand).
+//
+// skipRegions is optional, which is used to skip some masked regions.
+// E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
+// where need to be ommitted.
+//
+// The regions should be 0-based and ascendingly sorted.
+// e.g., [100, 130], [200, 230] ...
+func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
+	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
+	for i := range *hashes {
+		(*hashes)[i] = math.MaxUint64
+	}
+
+	masks := lh.Masks
+	k := lh.K
+	var mask, hash, h uint64
+	var kmer, kmerRC uint64
+	var ok bool
+	var i, j, js int
+	var locs *[]int
+
+	nRegions := len(skipRegions)
+	checkRegion := nRegions > 0
+	var ri, rs, re int
+
+	// -----------------------------------------------------------------------------
+	// fast locating of mask to compare with prefix indexing
+
+	// This k-mer iterator is a simplified version of
+	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
+	iter, err := iterator.NewKmerIterator(s, lh.K)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	m3 := lh.mN
+	var list *[]int
+	p := lh.prefix
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+	}
+
+	for {
+		kmer, kmerRC, ok, _ = iter.NextKmer()
+		if !ok {
+			break
+		}
+		if kmer == 0 { // all bases are A's or N's.
+			continue
+		}
+
+		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == nRegions { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+					}
+				}
+
+				continue
+			}
+		}
+
+		js = j << 1
+
+		// ---------- positive strand ----------
+
+		list = m3[kmer>>((k-p)<<1)]
+		if list != nil {
+			for _, i = range *list {
+				mask = masks[i]
+				h = (*hashes)[i]
+
+				hash = kmer ^ mask
+
+				if hash > h {
+					continue
+				}
+
+				// hash <= h
+				locs = &(*locses)[i]
+				if hash < h {
+					*locs = (*locs)[:1]
+					(*locs)[0] = js
+
+					(*hashes)[i] = hash
+					(*_kmers)[i] = kmer
+				} else {
+					*locs = append(*locs, js)
+				}
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		list = m3[kmerRC>>((k-p)<<1)]
+		if list != nil {
+			for _, i = range *list {
+				mask = masks[i]
+				h = (*hashes)[i]
+
+				hash = kmerRC ^ mask
+
+				if hash > h {
+					continue
+				}
+
+				// hash <= h
+				locs = &(*locses)[i]
+				if hash < h {
+					*locs = (*locs)[:1]
+					(*locs)[0] = js
+
+					(*hashes)[i] = hash
+					(*_kmers)[i] = kmerRC
+				} else {
+					*locs = append(*locs, js)
+				}
+			}
+		}
+	}
+
+	// -----------------------------------------------------------------------------
+	// some masks may not have any matches,
+	// just set the k-mer to 0, then download analysis should skip these k-mers.
+
+	for i, h := range *hashes {
+		if h == math.MaxUint64 {
+			(*_kmers)[i] = 0
+		}
+	}
+
+	lh.poolHashes.Put(hashes)
 	return _kmers, locses, nil
 }
 
