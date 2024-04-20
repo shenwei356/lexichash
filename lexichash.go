@@ -650,7 +650,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 	m3 := lh.mN
 	var list *[]int
-	p := lh.prefix
+	shiftOffset := ((k - lh.prefix) << 1)
 
 	if checkRegion {
 		ri = 0
@@ -688,7 +688,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		// ---------- positive strand ----------
 
-		list = m3[kmer>>((k-p)<<1)]
+		list = m3[kmer>>shiftOffset]
 		if list != nil {
 			for _, i = range *list {
 				mask = masks[i]
@@ -718,7 +718,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		js |= 1 // add the strand flag to the location
 
-		list = m3[kmerRC>>((k-p)<<1)]
+		list = m3[kmerRC>>shiftOffset]
 		if list != nil {
 			for _, i = range *list {
 				mask = masks[i]
