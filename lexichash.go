@@ -253,12 +253,13 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	var ok bool
 	var prefix uint64
 	var tries int
+	shiftOffset := (k - p) << 1
 	for {
 		v = r.Uint64()
 		mask = Hash64(v)&_mask | masks[i]<<shiftP
 
 		if checkLC {
-			prefix = mask >> ((k - p) << 1)
+			prefix = mask >> shiftOffset
 			if IsLowComplexity(prefix, p) {
 				tries++
 				if tries <= 10 {
@@ -294,9 +295,11 @@ func (lh *LexicHash) indexMasks() {
 	var list *[]int
 
 	// 3
+
+	shiftOffset := (k - 3) << 1
 	m := make([]*[]int, 1<<(3<<1))
 	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 3) << 1)
+		prefix = mask >> shiftOffset
 		if list = m[prefix]; list == nil {
 			m[prefix] = &[]int{i}
 		} else {
@@ -306,9 +309,10 @@ func (lh *LexicHash) indexMasks() {
 	lh.m3 = m
 
 	// 5
+	shiftOffset = (k - 5) << 1
 	m = make([]*[]int, 1<<(5<<1))
 	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - 5) << 1)
+		prefix = mask >> shiftOffset
 		if list = m[prefix]; list == nil {
 			m[prefix] = &[]int{i}
 		} else {
@@ -332,8 +336,9 @@ func (lh *LexicHash) IndexMasks(p int) error {
 	var ok bool
 
 	m := make(map[uint64]*[]int, 1024)
+	shiftOffset := (k - p) << 1
 	for i, mask := range lh.Masks {
-		prefix = mask >> ((k - p) << 1)
+		prefix = mask >> shiftOffset
 		if list, ok = m[prefix]; !ok {
 			m[prefix] = &[]int{i}
 		} else {
@@ -406,6 +411,8 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		rs, re = skipRegions[ri][0], skipRegions[ri][1]
 	}
 
+	shiftOffset := (k - 3) << 1
+
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
 		if !ok {
@@ -437,7 +444,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		// ---------- positive strand ----------
 
-		for _, i = range *m3[int(kmer>>((k-3)<<1))] {
+		for _, i = range *m3[int(kmer>>shiftOffset)] {
 			mask = masks[i]
 			h = (*hashes)[i]
 
@@ -464,7 +471,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 		js |= 1 // add the strand flag to the location
 
-		for _, i = range *m3[int(kmerRC>>((k-3)<<1))] {
+		for _, i = range *m3[int(kmerRC>>shiftOffset)] {
 			mask = masks[i]
 			h = (*hashes)[i]
 
@@ -648,9 +655,9 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 		return nil, nil, err
 	}
 
-	m3 := lh.mN
+	mN := lh.mN
 	var list *[]int
-	shiftOffset := ((k - lh.prefix) << 1)
+	shiftOffset := (k - lh.prefix) << 1
 
 	if checkRegion {
 		ri = 0
@@ -688,7 +695,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		// ---------- positive strand ----------
 
-		list = m3[kmer>>shiftOffset]
+		list = mN[kmer>>shiftOffset]
 		if list != nil {
 			for _, i = range *list {
 				mask = masks[i]
@@ -718,7 +725,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		js |= 1 // add the strand flag to the location
 
-		list = m3[kmerRC>>shiftOffset]
+		list = mN[kmerRC>>shiftOffset]
 		if list != nil {
 			for _, i = range *list {
 				mask = masks[i]
@@ -757,6 +764,40 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 	lh.poolHashes.Put(hashes)
 	return _kmers, locses, nil
+}
+
+// MaskKmer returns the indexes of masks that possibly mask a k-mer.
+// Don't forget to recycle the result via RecycleMaskKmerResult.
+func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
+	list := lh.poolList.Get().(*[]int)
+	*list = (*list)[:0]
+
+	var _list *[]int
+	var shiftOffset int
+	var ok bool
+	shiftOffset = (lh.K - lh.prefix) << 1
+	if _list, ok = lh.mN[kmer>>shiftOffset]; ok {
+		*list = append(*list, (*_list)...) // directly return _list is dangerous
+		return list
+	}
+
+	shiftOffset = (lh.K - 5) << 1
+	if _list = lh.m5[kmer>>shiftOffset]; _list != nil {
+		*list = append(*list, (*_list)...) // directly return _list is dangerous
+		return list
+	}
+
+	shiftOffset = (lh.K - 3) << 1
+	_list = lh.m3[kmer>>shiftOffset]   // it can't be nil
+	*list = append(*list, (*_list)...) // directly return _list is dangerous
+	return list
+}
+
+// RecycleMaskKmerResult recycles the result of MaskKmer()
+func (lh *LexicHash) RecycleMaskKmerResult(list *[]int) {
+	if list != nil {
+		lh.poolList.Put(list)
+	}
 }
 
 // MaskLongSeqs is faster than Mask() for longer sequences, requiring nMasks >= 1024.
@@ -804,6 +845,9 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 		rs, re = skipRegions[ri][0], skipRegions[ri][1]
 	}
 
+	shiftOffset5 := (k - 5) << 1
+	shiftOffset3 := (k - 3) << 1
+
 	for {
 		kmer, kmerRC, ok, _ = iter.NextKmer()
 		if !ok {
@@ -835,9 +879,9 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 		// ---------- positive strand ----------
 
-		maskIdxs = m5[int(kmer>>((k-5)<<1))]
+		maskIdxs = m5[int(kmer>>shiftOffset5)]
 		if maskIdxs == nil {
-			maskIdxs = m3[int(kmer>>((k-3)<<1))]
+			maskIdxs = m3[int(kmer>>shiftOffset3)]
 		}
 
 		for _, i = range *maskIdxs {
@@ -867,9 +911,9 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 		js |= 1 // add the strand flag to the location
 
-		maskIdxs = m5[int(kmerRC>>((k-5)<<1))]
+		maskIdxs = m5[int(kmerRC>>shiftOffset5)]
 		if maskIdxs == nil {
-			maskIdxs = m3[int(kmerRC>>((k-3)<<1))]
+			maskIdxs = m3[int(kmerRC>>shiftOffset3)]
 		}
 
 		for _, i = range *maskIdxs {
