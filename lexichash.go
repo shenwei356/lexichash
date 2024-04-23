@@ -759,6 +759,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	for i, h := range *hashes {
 		if h == math.MaxUint64 {
 			(*_kmers)[i] = 0
+			(*locses)[i] = (*locses)[i][:0]
 		}
 	}
 
