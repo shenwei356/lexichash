@@ -365,6 +365,7 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // It returns
 //
 //  1. the list of the most similar k-mers for each mask.
+//     Note that k-mers of all A's or N's are skipped in k-mer generation step.
 //  2. the start 0-based positions of all k-mers, with the last 1 bit as the strand
 //     flag (1 for negative strand).
 //
@@ -418,9 +419,6 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		if !ok {
 			break
 		}
-		if kmer == 0 { // all bases are A's or N's.
-			continue
-		}
 
 		j = iter.Index()
 
@@ -438,6 +436,10 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 				continue
 			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
 		}
 
 		js = j << 1
@@ -528,7 +530,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 			break
 		}
 
-		if kmer == 0 { // all bases are A's or N's.
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
 			continue
 		}
 
@@ -616,8 +618,10 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 // It returns
 //
 //  1. the list of the most similar k-mers for each mask.
+//     Note that k-mers of all A's or N's are skipped in k-mer generation step.
 //  2. the start 0-based positions of all k-mers, with the last 1 bit as the strand
 //     flag (1 for negative strand).
+//     Attention: It might be empty (len() == 0), if there's no k-mers are captured.
 //
 // skipRegions is optional, which is used to skip some masked regions.
 // E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
@@ -669,9 +673,6 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 		if !ok {
 			break
 		}
-		if kmer == 0 { // all bases are A's or N's.
-			continue
-		}
 
 		j = iter.Index()
 
@@ -689,6 +690,10 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 				continue
 			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
 		}
 
 		js = j << 1
@@ -801,7 +806,7 @@ func (lh *LexicHash) RecycleMaskKmerResult(list *[]int) {
 	}
 }
 
-// MaskLongSeqs is faster than Mask() for longer sequences, requiring nMasks >= 1024.
+// MaskLongSeqs is faster than Mask() for longer sequences by using longer 5-bp prefixes for creating the lookup table, requiring nMasks >= 1024.
 func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
 	if len(lh.Masks) < 1024 {
 		return nil, nil, fmt.Errorf("MaskLongSeqs is not support for masks < 1024")
@@ -854,9 +859,6 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 		if !ok {
 			break
 		}
-		if kmer == 0 { // all bases are A's or N's.
-			continue
-		}
 
 		j = iter.Index()
 
@@ -874,6 +876,10 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 				continue
 			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
 		}
 
 		js = j << 1
@@ -974,10 +980,6 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 			break
 		}
 
-		if kmer == 0 { // all bases are A's or N's.
-			continue
-		}
-
 		j = iter.Index()
 
 		// skip some regions
@@ -993,6 +995,10 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 				}
 				continue
 			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
 		}
 
 		js = j << 1
