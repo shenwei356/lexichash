@@ -1,6 +1,6 @@
 # Changelog
 
-### v0.4.0 - 2024-04-xx
+### v0.4.0 - 2024-05-13
 
 - All A's or N's are skipped in k-mer generation step.
 - Add method `IndexMasks` and `MaskKnownPrefixes` for faster masking k-mers of which the prefixes are existed.
