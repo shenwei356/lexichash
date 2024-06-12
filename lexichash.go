@@ -59,8 +59,9 @@ type LexicHash struct {
 	m3 []*[]int
 	m5 []*[]int
 
-	mN     map[uint64]*[]int // the length of the prefix is given by IndexMasks
-	prefix int               //
+	// mN     map[uint64]*[]int // the length of the prefix is given by IndexMasks
+	mN     []*[]int // slice is faster than map
+	prefix int      //
 
 	// pool for checking masks without matches.
 	// sync.Pool is used because Mask() method might be called concurrently.
@@ -323,8 +324,9 @@ func (lh *LexicHash) indexMasks() {
 
 }
 
-// IndexMasks creates a lookup table with the p-bp prefixes,
+// IndexMasks creates a lookup table (a slice) with the p-bp prefixes,
 // then you can use MaskKnownPrefixes() to masks k-mers of which the prefixes are existed.
+// The lenght of prefix p can't be too big, or the lookup table (a slice) would occupy a lot of space.
 func (lh *LexicHash) IndexMasks(p int) error {
 	k := lh.K
 	if p < 3 || p > k {
@@ -333,13 +335,13 @@ func (lh *LexicHash) IndexMasks(p int) error {
 
 	var prefix uint64
 	var list *[]int
-	var ok bool
 
-	m := make(map[uint64]*[]int, 1024)
+	m := make([]*[]int, int(math.Pow(4, float64(p))))
 	shiftOffset := (k - p) << 1
 	for i, mask := range lh.Masks {
 		prefix = mask >> shiftOffset
-		if list, ok = m[prefix]; !ok {
+		list = m[prefix]
+		if list == nil {
 			m[prefix] = &[]int{i}
 		} else {
 			*list = append(*list, i)
@@ -780,9 +782,8 @@ func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 
 	var _list *[]int
 	var shiftOffset int
-	var ok bool
 	shiftOffset = (lh.K - lh.prefix) << 1
-	if _list, ok = lh.mN[kmer>>shiftOffset]; ok {
+	if _list = lh.mN[kmer>>shiftOffset]; _list != nil {
 		*list = append(*list, (*_list)...) // directly return _list is dangerous
 		return list
 	}

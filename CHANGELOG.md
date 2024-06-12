@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.4.1 - 2024-06-12
+
+- Faster `MaskKnownPrefixes` by replacing `map` with `slice` to act as the lookup table of prefixes.
+
 ### v0.4.0 - 2024-05-13
 
 - All A's or N's are skipped in k-mer generation step.
