@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.4.2 - 2024-06-16
+
+- Fix skipping regions by further including the last k-1 bases of contigs.
+
 ### v0.4.1 - 2024-06-12
 
 - Faster `MaskKnownPrefixes` by replacing `map` with `slice` to act as the lookup table of prefixes.

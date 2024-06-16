@@ -411,7 +411,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 	}
 
 	shiftOffset := (k - 3) << 1
@@ -432,7 +432,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 					}
 				}
 
@@ -523,7 +523,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 	}
 
 	for {
@@ -546,7 +546,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 					}
 				}
 				continue
@@ -667,7 +667,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 	}
 
 	for {
@@ -686,7 +686,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 					}
 				}
 
@@ -849,7 +849,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 	}
 
 	shiftOffset5 := (k - 5) << 1
@@ -871,7 +871,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 					}
 				}
 
@@ -972,7 +972,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0], skipRegions[ri][1]
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 	}
 
 	for {
@@ -991,7 +991,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 					if ri == nRegions { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0], skipRegions[ri][1]
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
 					}
 				}
 				continue
