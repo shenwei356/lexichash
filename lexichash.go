@@ -60,8 +60,10 @@ type LexicHash struct {
 	m5 []*[]int
 
 	// mN     map[uint64]*[]int // the length of the prefix is given by IndexMasks
-	mN     []*[]int // slice is faster than map
-	prefix int      //
+	mN      []*[]int // slice is faster than map
+	prefix  int      //
+	mU      []*int   // one prefix refers to only one mask
+	prefixU int      //
 
 	// pool for checking masks without matches.
 	// sync.Pool is used because Mask() method might be called concurrently.
@@ -255,6 +257,11 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	var prefix uint64
 	var tries int
 	shiftOffset := (k - p) << 1
+
+	m2 := make(map[uint64]interface{}, nMasks) // to make sure prefixes of lenPrefix+1 are distinct
+	var dprefix uint64
+	var dShiftOffset = (k - (lenPrefix + 1)) << 1
+
 	for {
 		v = r.Uint64()
 		mask = Hash64(v)&_mask | masks[i]<<shiftP
@@ -270,6 +277,14 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 			}
 		}
 
+		// make sure the prefix is unique
+		dprefix = mask >> dShiftOffset
+		if _, ok = m2[dprefix]; ok {
+			continue
+		}
+		m2[dprefix] = struct{}{}
+
+		// make sure the mask is unique
 		if _, ok = m[mask]; ok {
 			continue
 		}
@@ -349,6 +364,30 @@ func (lh *LexicHash) IndexMasks(p int) error {
 	}
 	lh.mN = m
 	lh.prefix = p
+	return nil
+}
+
+// IndexMasksWithDistinctPrefixes is similar to IndexMasks, but the size of p is tricky,
+// it should be larger to ensure each prefix only refers to one mask.
+// E.g., p == $(p in IndexMasks) + 1.
+// Note that you also need to call IndexMasks.
+func (lh *LexicHash) IndexMasksWithDistinctPrefixes(p int) error {
+	k := lh.K
+	if p < 3 || p > k {
+		return ErrPrefixOverflow
+	}
+
+	var prefix uint64
+
+	m := make([]*int, int(math.Pow(4, float64(p))))
+	shiftOffset := (k - p) << 1
+	for i, mask := range lh.Masks {
+		prefix = mask >> shiftOffset
+		i2 := i
+		m[prefix] = &i2
+	}
+	lh.mU = m
+	lh.prefixU = p
 	return nil
 }
 
@@ -662,6 +701,10 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	}
 
 	mN := lh.mN
+	if mN == nil {
+		return nil, nil, fmt.Errorf("IndexMasks is not called first")
+	}
+
 	var list *[]int
 	shiftOffset := (k - lh.prefix) << 1
 
@@ -774,7 +817,227 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	return _kmers, locses, nil
 }
 
+// MaskKnownDistinctPrefixes is similar to MaskKnownPrefixes.
+// You need to call both IndexMasks and IndexMasksWithDistinctPrefixes first.
+// When the prefixes of p' (in IndexMasksWithDistinctPrefixes) are distinct, it would be faster.
+// For safety, checkShorterPrefix should be true to check shorter prefix (p in IndexMasks).
+// E.g., p=7, and p'=8, for masks=40000.
+//
+// E.g., We got masks with 3 8-bp prefixes below, one of them would refer to one specific mask.
+//
+//	AAAACCCA
+//	AAAACCCG
+//	AAAACCCT
+//
+// But for AAAACCCc, it won't. So we have to check all masks with a shorter prefix (AAAACCC).
+// While in some specific cases, there's no need to further check, like filling sketching deserts.
+func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
+	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
+	for i := range *hashes {
+		(*hashes)[i] = math.MaxUint64
+	}
+
+	masks := lh.Masks
+	k := lh.K
+	var mask, hash, h uint64
+	var kmer, kmerRC uint64
+	var ok bool
+	var i, j, js int
+	var locs *[]int
+
+	nRegions := len(skipRegions)
+	checkRegion := nRegions > 0
+	var ri, rs, re int
+
+	// -----------------------------------------------------------------------------
+	// fast locating of mask to compare with prefix indexing
+
+	// This k-mer iterator is a simplified version of
+	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
+	iter, err := iterator.NewKmerIterator(s, lh.K)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	mN := lh.mN
+	if mN == nil {
+		return nil, nil, fmt.Errorf("IndexMasks is not called first")
+	}
+
+	mU := lh.mU
+	if mU == nil {
+		return nil, nil, fmt.Errorf("IndexMasksWithDistinctPrefixes is not called first")
+	}
+
+	var list *[]int
+	shiftOffset := (k - lh.prefix) << 1
+
+	var ip *int
+	shiftOffsetU := (k - lh.prefixU) << 1
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+	}
+
+	for {
+		kmer, kmerRC, ok, _ = iter.NextKmer()
+		if !ok {
+			break
+		}
+
+		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == nRegions { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+					}
+				}
+
+				continue
+			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
+		}
+
+		js = j << 1
+
+		// ---------- positive strand ----------
+
+		ip = mU[kmer>>shiftOffsetU]
+		if ip != nil {
+			i = *ip
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmer ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmer
+			} else {
+				*locs = append(*locs, js)
+			}
+		} else if checkShorterPrefix {
+			list = mN[kmer>>shiftOffset]
+			if list != nil {
+				for _, i = range *list {
+					mask = masks[i]
+					h = (*hashes)[i]
+
+					hash = kmer ^ mask
+
+					if hash > h {
+						continue
+					}
+
+					// hash <= h
+					locs = &(*locses)[i]
+					if hash < h {
+						*locs = (*locs)[:1]
+						(*locs)[0] = js
+
+						(*hashes)[i] = hash
+						(*_kmers)[i] = kmer
+					} else {
+						*locs = append(*locs, js)
+					}
+				}
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		ip = mU[kmerRC>>shiftOffsetU]
+		if ip != nil {
+			i = *ip
+			mask = masks[i]
+			h = (*hashes)[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &(*locses)[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				(*hashes)[i] = hash
+				(*_kmers)[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		} else if checkShorterPrefix {
+			list = mN[kmerRC>>shiftOffset]
+			if list != nil {
+				for _, i = range *list {
+					mask = masks[i]
+					h = (*hashes)[i]
+
+					hash = kmerRC ^ mask
+
+					if hash > h {
+						continue
+					}
+
+					// hash <= h
+					locs = &(*locses)[i]
+					if hash < h {
+						*locs = (*locs)[:1]
+						(*locs)[0] = js
+
+						(*hashes)[i] = hash
+						(*_kmers)[i] = kmerRC
+					} else {
+						*locs = append(*locs, js)
+					}
+				}
+			}
+		}
+	}
+
+	// -----------------------------------------------------------------------------
+	// some masks may not have any matches,
+	// just set the k-mer to 0, then download analysis should skip these k-mers.
+
+	for i, h := range *hashes {
+		if h == math.MaxUint64 {
+			(*_kmers)[i] = 0
+			(*locses)[i] = (*locses)[i][:0]
+		}
+	}
+
+	lh.poolHashes.Put(hashes)
+	return _kmers, locses, nil
+}
+
 // MaskKmer returns the indexes of masks that possibly mask a k-mer.
+// IndexMasks or IndexMasksWithDistinctPrefixes is recommended to run first.
 // Don't forget to recycle the result via RecycleMaskKmerResult.
 func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 	list := lh.poolList.Get().(*[]int)
@@ -782,10 +1045,21 @@ func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 
 	var _list *[]int
 	var shiftOffset int
-	shiftOffset = (lh.K - lh.prefix) << 1
-	if _list = lh.mN[kmer>>shiftOffset]; _list != nil {
-		*list = append(*list, (*_list)...) // directly return _list is dangerous
-		return list
+
+	if lh.mU != nil {
+		shiftOffset = (lh.K - lh.prefixU) << 1
+		if ip := lh.mU[kmer>>shiftOffset]; ip != nil {
+			*list = append(*list, *ip) // directly return _list is dangerous
+			return list
+		}
+	}
+
+	if lh.mN != nil {
+		shiftOffset = (lh.K - lh.prefix) << 1
+		if _list = lh.mN[kmer>>shiftOffset]; _list != nil {
+			*list = append(*list, (*_list)...) // directly return _list is dangerous
+			return list
+		}
 	}
 
 	shiftOffset = (lh.K - 5) << 1

@@ -1,5 +1,11 @@
 # Changelog
 
+### v0.5.0 - 2024-07-22
+
+- Better mask generation: requiring prefixes of `p+1` to be distinct.
+- New methods `IndexMasksWithDistinctPrefixes` and `MaskKnownDistinctPrefixes`.
+- Safer `MaskKmer`.
+
 ### v0.4.2 - 2024-06-16
 
 - Fix skipping regions by further including the last k-1 bases of contigs.
