@@ -304,6 +304,12 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	return masks
 }
 
+// SupportSoftMasking treats lowercase bases in soft-masked low-complexity regions as A's.
+// It should to be called before Mask* methods.
+func (lh *LexicHash) SupportSoftMasking() {
+	iterator.SupportSoftMasking = true
+}
+
 // indexMasks indexes masks with lists for fast locating masks to compare
 func (lh *LexicHash) indexMasks() {
 	k := lh.K

@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.5.1 - 2026-02-28
+
+- Added a new method `SupportSoftMasking` for `LexicHash`.
+
 ### v0.5.0 - 2024-07-22
 
 - Better mask generation: requiring prefixes of `p+1` to be distinct.

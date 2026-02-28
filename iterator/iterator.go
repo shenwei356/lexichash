@@ -66,7 +66,12 @@ type Iterator struct {
 
 	mask1 uint64 // (1<<(kP1Uint*2))-1
 	mask2 uint   // iter.kP1Uint*2
+
+	base2bit [256]uint64
 }
+
+// SupportSoftMasking is use to specify that lowercase base will be treated as A's.
+var SupportSoftMasking = false
 
 // NewKmerIterator returns a k-mer code iterator.
 func NewKmerIterator(s []byte, k int) (*Iterator, error) {
@@ -93,6 +98,12 @@ func NewKmerIterator(s []byte, k int) (*Iterator, error) {
 
 	iter.first = true
 
+	if SupportSoftMasking {
+		iter.base2bit = base2bitCaseSensitive
+	} else {
+		iter.base2bit = base2bit
+	}
+
 	return iter, nil
 }
 
@@ -114,7 +125,7 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 	iter.kmer = iter.s[iter.idx:iter.e]
 
 	if !iter.first {
-		iter.codeBase = base2bit[iter.kmer[iter.kP1]]
+		iter.codeBase = iter.base2bit[iter.kmer[iter.kP1]]
 		if iter.codeBase == 4 {
 			err = ErrIllegalBase
 		}
@@ -156,7 +167,7 @@ func (iter *Iterator) NextPositiveKmer() (code uint64, ok bool, err error) {
 	iter.kmer = iter.s[iter.idx:iter.e]
 
 	if !iter.first {
-		iter.codeBase = base2bit[iter.kmer[iter.kP1]]
+		iter.codeBase = iter.base2bit[iter.kmer[iter.kP1]]
 		if iter.codeBase == 4 {
 			err = ErrIllegalBase
 		}
@@ -191,6 +202,26 @@ var base2bit = [256]uint64{
 	4, 4, 0, 1, 3, 3, 0, 0, 4, 1, 4, 4, 4, 4, 4, 4,
 	4, 0, 1, 1, 0, 4, 4, 2, 0, 4, 4, 2, 4, 0, 0, 4,
 	4, 4, 0, 1, 3, 3, 0, 0, 4, 1, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+}
+
+// base2bitCaseSensitive converts all lower-cases to A, to support soft masking
+var base2bitCaseSensitive = [256]uint64{
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 0, 1, 1, 0, 4, 4, 2, 0, 4, 4, 2, 4, 0, 0, 4,
+	4, 4, 0, 1, 3, 3, 0, 0, 4, 1, 4, 4, 4, 4, 4, 4,
+	4, 0, 0, 0, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, // convert all lower cases to A
+	4, 4, 0, 0, 0, 0, 0, 0, 4, 0, 4, 4, 4, 4, 4, 4, // convert all lower cases to A
 	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 	4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
