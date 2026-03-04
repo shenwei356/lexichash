@@ -462,7 +462,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	shiftOffset := (k - 3) << 1
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}
@@ -572,7 +576,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	}
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}
@@ -720,7 +728,11 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	}
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}
@@ -889,7 +901,11 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	}
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}
@@ -1136,7 +1152,11 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 	shiftOffset3 := (k - 3) << 1
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}
@@ -1256,7 +1276,11 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 	}
 
 	for {
-		kmer, kmerRC, ok, _ = iter.NextKmer()
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if !ok {
 			break
 		}

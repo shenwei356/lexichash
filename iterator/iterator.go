@@ -141,7 +141,7 @@ func (iter *Iterator) NextKmer() (code, codeRC uint64, ok bool, err error) {
 		iter.first = false
 	}
 	if err != nil {
-		return 0, 0, false, fmt.Errorf("encode %s: %s", iter.kmer, err)
+		return 0, 0, false, fmt.Errorf("encode %q: %s", iter.kmer, err)
 	}
 
 	iter.preCode = code
