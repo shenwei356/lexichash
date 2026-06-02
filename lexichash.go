@@ -849,6 +849,13 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 //
 // But for AAAACCCc, it won't. So we have to check all masks with a shorter prefix (AAAACCC).
 // While in some specific cases, there's no need to further check, like filling sketching deserts.
+//
+// skipRegions is optional, which is used to skip some masked regions.
+// E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
+// where need to be ommitted.
+//
+// The regions should be 0-based and ascendingly sorted.
+// e.g., [100, 130], [200, 230] ...
 func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
