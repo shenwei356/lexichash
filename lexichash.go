@@ -218,7 +218,7 @@ func NewFromTextFile(file string) (*LexicHash, error) {
 // p is the length of prefixes which need to be checked for low-complexity.
 func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	masks := make([]uint64, nMasks)
-	m := make(map[uint64]interface{}, nMasks) // to avoid duplicates
+	m := make(map[uint64]struct{}, nMasks) // to avoid duplicates
 	r := rand.New(rand.NewSource(randSeed))
 	if p > k {
 		p = k
@@ -270,7 +270,7 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 	var tries int
 	shiftOffset := (k - p) << 1
 
-	m2 := make(map[uint64]interface{}, nMasks) // to make sure prefixes of lenPrefix+1 are distinct
+	m2 := make(map[uint64]struct{}, nMasks) // to make sure prefixes of lenPrefix+1 are distinct
 	var dprefix uint64
 	var dShiftOffset = (k - (lenPrefix + 1)) << 1
 

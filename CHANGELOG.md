@@ -1,8 +1,12 @@
 # Changelog
 
-### v0.5.2 - 2026-06-02
+### v0.5.3 - 2026-06-02
 
 - Slightly speedup
+
+### v0.5.2 - 2026-03-04
+
+- Check the validity of the sequence; never trust the user.
 
 ### v0.5.1 - 2026-02-28
 
