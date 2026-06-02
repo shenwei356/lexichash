@@ -1,4 +1,4 @@
-// Copyright © 2023-2024 Wei Shen <shenwei356@gmail.com>
+// Copyright © 2023-2026 Wei Shen <shenwei356@gmail.com>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"sync"
 )
@@ -238,6 +239,10 @@ func Read(r io.Reader) (*LexicHash, error) {
 		hashes := make([]uint64, len(masks))
 		return &hashes
 	}}
+	lh.defaultHashes = make([]uint64, len(masks))
+	for i := range lh.defaultHashes {
+		lh.defaultHashes[i] = math.MaxUint64
+	}
 
 	return lh, nil
 }

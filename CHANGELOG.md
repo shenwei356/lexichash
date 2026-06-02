@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.5.2 - 2026-06-02
+
+- Slightly speedup
+
 ### v0.5.1 - 2026-02-28
 
 - Added a new method `SupportSoftMasking` for `LexicHash`.

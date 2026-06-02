@@ -28,6 +28,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 
@@ -65,6 +66,9 @@ type LexicHash struct {
 	mU      []*int   // one prefix refers to only one mask
 	prefixU int      //
 
+	shiftOffset  int
+	shiftOffsetU int
+
 	// pool for checking masks without matches.
 	// sync.Pool is used because Mask() method might be called concurrently.
 	// the object is recycled in Mask().
@@ -78,6 +82,9 @@ type LexicHash struct {
 	// a []uint64 for storing hashes in Mask(),
 	// the object is recycled in Mask().
 	poolHashes *sync.Pool
+
+	// for reseting hash values
+	defaultHashes []uint64
 }
 
 // New returns a new LexicHash object.
@@ -124,8 +131,8 @@ func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
 		return nil, ErrInsufficientMasks
 	}
 	// checking mask
-	maxMask := 1<<(k<<1) - 1
-	for mask := range masks {
+	maxMask := uint64(1)<<(k<<1) - 1
+	for _, mask := range masks {
 		if mask > maxMask {
 			return nil, fmt.Errorf("lexichash: given invalid k-mer code for k=%d: %d", k, mask)
 		}
@@ -134,7 +141,7 @@ func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
 	lh := &LexicHash{K: k}
 
 	// sort
-	sort.Slice(masks, func(i, j int) bool { return masks[i] < masks[j] })
+	slices.Sort(masks)
 
 	lh.Masks = masks
 	lh.indexMasks()
@@ -160,6 +167,11 @@ func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
 		hashes := make([]uint64, len(masks))
 		return &hashes
 	}}
+
+	lh.defaultHashes = make([]uint64, len(masks))
+	for i := range lh.defaultHashes {
+		lh.defaultHashes[i] = math.MaxUint64
+	}
 
 	return lh, nil
 }
@@ -306,8 +318,9 @@ func genRandomMasks(k int, nMasks int, randSeed int64, p int) []uint64 {
 
 // SupportSoftMasking treats lowercase bases in soft-masked low-complexity regions as A's.
 // It should to be called before Mask* methods.
-func (lh *LexicHash) SupportSoftMasking() {
+func (lh *LexicHash) SupportSoftMasking() *LexicHash {
 	iterator.SupportSoftMasking = true
+	return lh
 }
 
 // indexMasks indexes masks with lists for fast locating masks to compare
@@ -370,6 +383,9 @@ func (lh *LexicHash) IndexMasks(p int) error {
 	}
 	lh.mN = m
 	lh.prefix = p
+
+	lh.shiftOffset = (k - lh.prefix) << 1
+
 	return nil
 }
 
@@ -394,6 +410,10 @@ func (lh *LexicHash) IndexMasksWithDistinctPrefixes(p int) error {
 	}
 	lh.mU = m
 	lh.prefixU = p
+
+	lh.shiftOffset = (k - lh.prefix) << 1
+	lh.shiftOffsetU = (k - lh.prefixU) << 1
+
 	return nil
 }
 
@@ -426,9 +446,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	for i := range *hashes {
-		(*hashes)[i] = math.MaxUint64
-	}
+	copy(*hashes, lh.defaultHashes)           // reset to math.MaxUint64
 
 	masks := lh.Masks
 	k := lh.K
@@ -688,9 +706,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	for i := range *hashes {
-		(*hashes)[i] = math.MaxUint64
-	}
+	copy(*hashes, lh.defaultHashes)           // reset to math.MaxUint64
 
 	masks := lh.Masks
 	k := lh.K
@@ -860,9 +876,7 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	for i := range *hashes {
-		(*hashes)[i] = math.MaxUint64
-	}
+	copy(*hashes, lh.defaultHashes)           // reset to math.MaxUint64
 
 	masks := lh.Masks
 	k := lh.K
@@ -897,10 +911,10 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	}
 
 	var list *[]int
-	shiftOffset := (k - lh.prefix) << 1
+	shiftOffset := lh.shiftOffset
 
 	var ip *int
-	shiftOffsetU := (k - lh.prefixU) << 1
+	shiftOffsetU := lh.shiftOffsetU
 
 	if checkRegion {
 		ri = 0
@@ -1076,7 +1090,7 @@ func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 	var shiftOffset int
 
 	if lh.mU != nil {
-		shiftOffset = (lh.K - lh.prefixU) << 1
+		shiftOffset = lh.shiftOffsetU
 		if ip := lh.mU[kmer>>shiftOffset]; ip != nil {
 			*list = append(*list, *ip) // directly return _list is dangerous
 			return list
@@ -1084,7 +1098,7 @@ func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 	}
 
 	if lh.mN != nil {
-		shiftOffset = (lh.K - lh.prefix) << 1
+		shiftOffset = lh.shiftOffset
 		if _list = lh.mN[kmer>>shiftOffset]; _list != nil {
 			*list = append(*list, (*_list)...) // directly return _list is dangerous
 			return list
@@ -1119,9 +1133,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	for i := range *hashes {
-		(*hashes)[i] = math.MaxUint64
-	}
+	copy(*hashes, lh.defaultHashes)           // reset to math.MaxUint64
 
 	masks := lh.Masks
 	k := lh.K

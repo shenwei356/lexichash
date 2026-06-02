@@ -19,6 +19,7 @@
 */Rplots.pdf
 
 *.pprof
+*.prof
 
 cmd/binaries/*
 cmd/lexic-hash-search
