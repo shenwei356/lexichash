@@ -2,7 +2,8 @@
 
 ### v0.5.4 - 2026-08-20
 
-- Improve speed of `MaskKnownPrefixes` and `MaskKnownDistinctPrefixes` by 20%.
+- **Fix `MaskKnownDistinctPrefixes` incorrectly skipping some negative-strand k-mers.**
+- Improve the speed of `MaskKnownPrefixes` and `MaskKnownDistinctPrefixes` by 20%.
 
 ### v0.5.3 - 2026-06-02
 
