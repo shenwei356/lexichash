@@ -25,9 +25,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"os"
-	"sync"
 )
 
 var be = binary.BigEndian
@@ -217,32 +215,7 @@ func Read(r io.Reader) (*LexicHash, error) {
 
 	// index masks
 	lh.indexMasks()
-
-	// do not forgot the buffer
-
-	lh.poolList = &sync.Pool{New: func() interface{} {
-		tmp := make([]int, 128)
-		return &tmp
-	}}
-	lh.poolKmers = &sync.Pool{New: func() interface{} {
-		kmers := make([]uint64, len(masks))
-		return &kmers
-	}}
-	lh.poolLocses = &sync.Pool{New: func() interface{} {
-		locses := make([][]int, len(masks))
-		for i := range locses {
-			locses[i] = make([]int, 1)
-		}
-		return &locses
-	}}
-	lh.poolHashes = &sync.Pool{New: func() interface{} {
-		hashes := make([]uint64, len(masks))
-		return &hashes
-	}}
-	lh.defaultHashes = make([]uint64, len(masks))
-	for i := range lh.defaultHashes {
-		lh.defaultHashes[i] = math.MaxUint64
-	}
+	lh.initPools()
 
 	return lh, nil
 }

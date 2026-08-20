@@ -60,11 +60,20 @@ type LexicHash struct {
 	m3 []*[]int
 	m5 []*[]int
 
-	// mN     map[uint64]*[]int // the length of the prefix is given by IndexMasks
-	mN      []*[]int // slice is faster than map
-	prefix  int      //
-	mU      []*int   // one prefix refers to only one mask
-	prefixU int      //
+	// Compact CSR-style prefix index used by MaskKnownPrefixes and
+	// MaskKnownDistinctPrefixes. mNOffsets has one more element than the
+	// number of possible prefixes, so the candidate mask indexes for prefix x
+	// are stored in mNIndexes[ mNOffsets[x] : mNOffsets[x+1] ]. mNIndexes stores
+	// the original indexes in Masks, so Masks does not need to be sorted.
+	mNOffsets []uint32
+	mNIndexes []uint32
+	prefix    int
+
+	// Direct lookup table for the longer prefixes that should be distinct.
+	// Zero means absent; a nonzero value stores the mask index plus one, which
+	// lets mask index zero be represented without allocating pointers.
+	mU      []int32
+	prefixU int
 
 	shiftOffset  int
 	shiftOffsetU int
@@ -145,6 +154,13 @@ func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
 
 	lh.Masks = masks
 	lh.indexMasks()
+	lh.initPools()
+
+	return lh, nil
+}
+
+func (lh *LexicHash) initPools() {
+	nMasks := len(lh.Masks)
 
 	// ------------ pools ------------
 
@@ -153,27 +169,26 @@ func NewWithMasks(k int, masks []uint64) (*LexicHash, error) {
 		return &tmp
 	}}
 	lh.poolKmers = &sync.Pool{New: func() interface{} {
-		kmers := make([]uint64, len(masks))
+		kmers := make([]uint64, nMasks)
 		return &kmers
 	}}
 	lh.poolLocses = &sync.Pool{New: func() interface{} {
-		locses := make([][]int, len(masks))
+		locses := make([][]int, nMasks)
+		initialLocs := make([]int, nMasks)
 		for i := range locses {
-			locses[i] = make([]int, 1)
+			locses[i] = initialLocs[i : i+1 : i+1]
 		}
 		return &locses
 	}}
 	lh.poolHashes = &sync.Pool{New: func() interface{} {
-		hashes := make([]uint64, len(masks))
+		hashes := make([]uint64, nMasks)
 		return &hashes
 	}}
 
-	lh.defaultHashes = make([]uint64, len(masks))
+	lh.defaultHashes = make([]uint64, nMasks)
 	for i := range lh.defaultHashes {
 		lh.defaultHashes[i] = math.MaxUint64
 	}
-
-	return lh, nil
 }
 
 // NewFromTextFile creates a new LexicHash object with custom kmers in a txt file.
@@ -366,22 +381,37 @@ func (lh *LexicHash) IndexMasks(p int) error {
 	if p < 3 || p > k {
 		return ErrPrefixOverflow
 	}
-
-	var prefix uint64
-	var list *[]int
-
-	m := make([]*[]int, int(math.Pow(4, float64(p))))
-	shiftOffset := (k - p) << 1
-	for i, mask := range lh.Masks {
-		prefix = mask >> shiftOffset
-		list = m[prefix]
-		if list == nil {
-			m[prefix] = &[]int{i}
-		} else {
-			*list = append(*list, i)
-		}
+	if uint64(len(lh.Masks)) > uint64(^uint32(0)) {
+		return fmt.Errorf("lexichash: too many masks to index: %d", len(lh.Masks))
 	}
-	lh.mN = m
+
+	nPrefixes := 1 << uint(p<<1)
+	offsets := make([]uint32, nPrefixes+1)
+	shiftOffset := (k - p) << 1
+
+	// Count masks in each prefix bucket. Counts go into prefix+1 so that the
+	// prefix sum below directly produces both boundaries of every bucket:
+	// offsets[prefix] is its start and offsets[prefix+1] is its end.
+	for _, mask := range lh.Masks {
+		offsets[(mask>>shiftOffset)+1]++
+	}
+	// Convert bucket sizes to cumulative offsets into indexes.
+	for i := 1; i < len(offsets); i++ {
+		offsets[i] += offsets[i-1]
+	}
+
+	// Fill each bucket with the original mask indexes. next is a write cursor
+	// for every bucket; consequently this works even when Masks is not sorted.
+	indexes := make([]uint32, len(lh.Masks))
+	next := slices.Clone(offsets[:nPrefixes])
+	for i, mask := range lh.Masks {
+		prefix := mask >> shiftOffset
+		indexes[next[prefix]] = uint32(i)
+		next[prefix]++
+	}
+
+	lh.mNOffsets = offsets
+	lh.mNIndexes = indexes
 	lh.prefix = p
 
 	lh.shiftOffset = (k - lh.prefix) << 1
@@ -398,15 +428,17 @@ func (lh *LexicHash) IndexMasksWithDistinctPrefixes(p int) error {
 	if p < 3 || p > k {
 		return ErrPrefixOverflow
 	}
+	const maxInt32 = int(^uint32(0) >> 1)
+	if len(lh.Masks) > maxInt32 {
+		return fmt.Errorf("lexichash: too many masks to index: %d", len(lh.Masks))
+	}
 
-	var prefix uint64
-
-	m := make([]*int, int(math.Pow(4, float64(p))))
+	m := make([]int32, 1<<uint(p<<1))
 	shiftOffset := (k - p) << 1
 	for i, mask := range lh.Masks {
-		prefix = mask >> shiftOffset
-		i2 := i
-		m[prefix] = &i2
+		prefix := mask >> shiftOffset
+		// Store index+1 because zero is reserved for an empty prefix slot.
+		m[prefix] = int32(i + 1)
 	}
 	lh.mU = m
 	lh.prefixU = p
@@ -730,12 +762,13 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 		return nil, nil, err
 	}
 
-	mN := lh.mN
-	if mN == nil {
+	offsets := lh.mNOffsets
+	if offsets == nil {
 		return nil, nil, fmt.Errorf("IndexMasks is not called first")
 	}
 
-	var list *[]int
+	indexes := lh.mNIndexes
+	var begin, end uint32
 	shiftOffset := (k - lh.prefix) << 1
 
 	if checkRegion {
@@ -779,9 +812,12 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		// ---------- positive strand ----------
 
-		list = mN[kmer>>shiftOffset]
-		if list != nil {
-			for _, i = range *list {
+		prefix := kmer >> shiftOffset
+		// All masks sharing this prefix occupy one contiguous range in indexes.
+		begin, end = offsets[prefix], offsets[prefix+1]
+		if begin != end {
+			for _, index := range indexes[begin:end] {
+				i = int(index)
 				mask = masks[i]
 				h = (*hashes)[i]
 
@@ -809,9 +845,11 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 		js |= 1 // add the strand flag to the location
 
-		list = mN[kmerRC>>shiftOffset]
-		if list != nil {
-			for _, i = range *list {
+		prefix = kmerRC >> shiftOffset
+		begin, end = offsets[prefix], offsets[prefix+1]
+		if begin != end {
+			for _, index := range indexes[begin:end] {
+				i = int(index)
 				mask = masks[i]
 				h = (*hashes)[i]
 
@@ -876,7 +914,14 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
-	copy(*hashes, lh.defaultHashes)           // reset to math.MaxUint64
+	kmers := *_kmers
+	locations := *locses
+	hashValues := *hashes
+	copy(hashValues, lh.defaultHashes) // reset to math.MaxUint64
+	clear(kmers)
+	for i := range locations {
+		locations[i] = locations[i][:0]
+	}
 
 	masks := lh.Masks
 	k := lh.K
@@ -900,20 +945,21 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 		return nil, nil, err
 	}
 
-	mN := lh.mN
-	if mN == nil {
+	offsets := lh.mNOffsets
+	if offsets == nil {
 		return nil, nil, fmt.Errorf("IndexMasks is not called first")
 	}
 
-	mU := lh.mU
-	if mU == nil {
+	distinct := lh.mU
+	if distinct == nil {
 		return nil, nil, fmt.Errorf("IndexMasksWithDistinctPrefixes is not called first")
 	}
 
-	var list *[]int
+	indexes := lh.mNIndexes
+	var begin, end uint32
 	shiftOffset := lh.shiftOffset
 
-	var ip *int
+	var indexPlusOne int32
 	shiftOffsetU := lh.shiftOffsetU
 
 	if checkRegion {
@@ -957,35 +1003,37 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 
 		// ---------- positive strand ----------
 
-		ip = mU[kmer>>shiftOffsetU]
-		if ip != nil {
-			i = *ip
+		// A matching longer prefix identifies one mask directly.
+		indexPlusOne = distinct[kmer>>shiftOffsetU]
+		if indexPlusOne != 0 {
+			i = int(indexPlusOne - 1)
 			mask = masks[i]
-			h = (*hashes)[i]
+			h = hashValues[i]
 
 			hash = kmer ^ mask
 
-			if hash > h {
-				continue
-			}
+			if hash <= h {
+				locs = &locations[i]
+				if hash < h {
+					*locs = (*locs)[:1]
+					(*locs)[0] = js
 
-			// hash <= h
-			locs = &(*locses)[i]
-			if hash < h {
-				*locs = (*locs)[:1]
-				(*locs)[0] = js
-
-				(*hashes)[i] = hash
-				(*_kmers)[i] = kmer
-			} else {
-				*locs = append(*locs, js)
+					hashValues[i] = hash
+					kmers[i] = kmer
+				} else {
+					*locs = append(*locs, js)
+				}
 			}
 		} else if checkShorterPrefix {
-			list = mN[kmer>>shiftOffset]
-			if list != nil {
-				for _, i = range *list {
+			prefix := kmer >> shiftOffset
+			// No distinct longer prefix matched, so check every mask in the
+			// contiguous bucket belonging to the shorter prefix.
+			begin, end = offsets[prefix], offsets[prefix+1]
+			if begin != end {
+				for _, index := range indexes[begin:end] {
+					i = int(index)
 					mask = masks[i]
-					h = (*hashes)[i]
+					h = hashValues[i]
 
 					hash = kmer ^ mask
 
@@ -994,13 +1042,13 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 					}
 
 					// hash <= h
-					locs = &(*locses)[i]
+					locs = &locations[i]
 					if hash < h {
 						*locs = (*locs)[:1]
 						(*locs)[0] = js
 
-						(*hashes)[i] = hash
-						(*_kmers)[i] = kmer
+						hashValues[i] = hash
+						kmers[i] = kmer
 					} else {
 						*locs = append(*locs, js)
 					}
@@ -1012,11 +1060,11 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 
 		js |= 1 // add the strand flag to the location
 
-		ip = mU[kmerRC>>shiftOffsetU]
-		if ip != nil {
-			i = *ip
+		indexPlusOne = distinct[kmerRC>>shiftOffsetU]
+		if indexPlusOne != 0 {
+			i = int(indexPlusOne - 1)
 			mask = masks[i]
-			h = (*hashes)[i]
+			h = hashValues[i]
 
 			hash = kmerRC ^ mask
 
@@ -1025,22 +1073,24 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 			}
 
 			// hash <= h
-			locs = &(*locses)[i]
+			locs = &locations[i]
 			if hash < h {
 				*locs = (*locs)[:1]
 				(*locs)[0] = js
 
-				(*hashes)[i] = hash
-				(*_kmers)[i] = kmerRC
+				hashValues[i] = hash
+				kmers[i] = kmerRC
 			} else {
 				*locs = append(*locs, js)
 			}
 		} else if checkShorterPrefix {
-			list = mN[kmerRC>>shiftOffset]
-			if list != nil {
-				for _, i = range *list {
+			prefix := kmerRC >> shiftOffset
+			begin, end = offsets[prefix], offsets[prefix+1]
+			if begin != end {
+				for _, index := range indexes[begin:end] {
+					i = int(index)
 					mask = masks[i]
-					h = (*hashes)[i]
+					h = hashValues[i]
 
 					hash = kmerRC ^ mask
 
@@ -1049,29 +1099,18 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 					}
 
 					// hash <= h
-					locs = &(*locses)[i]
+					locs = &locations[i]
 					if hash < h {
 						*locs = (*locs)[:1]
 						(*locs)[0] = js
 
-						(*hashes)[i] = hash
-						(*_kmers)[i] = kmerRC
+						hashValues[i] = hash
+						kmers[i] = kmerRC
 					} else {
 						*locs = append(*locs, js)
 					}
 				}
 			}
-		}
-	}
-
-	// -----------------------------------------------------------------------------
-	// some masks may not have any matches,
-	// just set the k-mer to 0, then download analysis should skip these k-mers.
-
-	for i, h := range *hashes {
-		if h == math.MaxUint64 {
-			(*_kmers)[i] = 0
-			(*locses)[i] = (*locses)[i][:0]
 		}
 	}
 
@@ -1091,16 +1130,20 @@ func (lh *LexicHash) MaskKmer(kmer uint64) *[]int {
 
 	if lh.mU != nil {
 		shiftOffset = lh.shiftOffsetU
-		if ip := lh.mU[kmer>>shiftOffset]; ip != nil {
-			*list = append(*list, *ip) // directly return _list is dangerous
+		if indexPlusOne := lh.mU[kmer>>shiftOffset]; indexPlusOne != 0 {
+			*list = append(*list, int(indexPlusOne-1))
 			return list
 		}
 	}
 
-	if lh.mN != nil {
+	if lh.mNOffsets != nil {
 		shiftOffset = lh.shiftOffset
-		if _list = lh.mN[kmer>>shiftOffset]; _list != nil {
-			*list = append(*list, (*_list)...) // directly return _list is dangerous
+		prefix := kmer >> shiftOffset
+		begin, end := lh.mNOffsets[prefix], lh.mNOffsets[prefix+1]
+		if begin != end {
+			for _, index := range lh.mNIndexes[begin:end] {
+				*list = append(*list, int(index))
+			}
 			return list
 		}
 	}
