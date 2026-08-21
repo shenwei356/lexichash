@@ -1118,6 +1118,219 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	return _kmers, locses, nil
 }
 
+// MaskKnownDistinctPrefixesWithStrandBias has a strand-bias bug.
+// It's only for backward-compatibility for LexicMap index v3.4 and early versions.
+func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegions [][2]int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
+	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
+	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
+	kmers := *_kmers
+	locations := *locses
+	hashValues := *hashes
+	copy(hashValues, lh.defaultHashes) // reset to math.MaxUint64
+	clear(kmers)
+	for i := range locations {
+		locations[i] = locations[i][:0]
+	}
+
+	masks := lh.Masks
+	k := lh.K
+	var mask, hash, h uint64
+	var kmer, kmerRC uint64
+	var ok bool
+	var i, j, js int
+	var locs *[]int
+
+	nRegions := len(skipRegions)
+	checkRegion := nRegions > 0
+	var ri, rs, re int
+
+	// -----------------------------------------------------------------------------
+	// fast locating of mask to compare with prefix indexing
+
+	// This k-mer iterator is a simplified version of
+	// https://github.com/shenwei356/bio/blob/master/sketches/iterator.go
+	iter, err := iterator.NewKmerIterator(s, lh.K)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	offsets := lh.mNOffsets
+	if offsets == nil {
+		return nil, nil, fmt.Errorf("IndexMasks is not called first")
+	}
+
+	distinct := lh.mU
+	if distinct == nil {
+		return nil, nil, fmt.Errorf("IndexMasksWithDistinctPrefixes is not called first")
+	}
+
+	indexes := lh.mNIndexes
+	var begin, end uint32
+	shiftOffset := lh.shiftOffset
+
+	var indexPlusOne int32
+	shiftOffsetU := lh.shiftOffsetU
+
+	if checkRegion {
+		ri = 0
+		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+	}
+
+	for {
+		kmer, kmerRC, ok, err = iter.NextKmer()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if !ok {
+			break
+		}
+
+		j = iter.Index()
+
+		// skip some regions
+		if checkRegion && rs <= j {
+			if j <= re { // in the region
+				if j == re { // update region to check
+					ri++
+					if ri == nRegions { // this is already the last one
+						checkRegion = false
+					} else {
+						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+					}
+				}
+
+				continue
+			}
+		}
+
+		if kmer == 0 || kmerRC == 0 { // all bases are A's or N's.
+			continue
+		}
+
+		js = j << 1
+
+		// ---------- positive strand ----------
+
+		// A matching longer prefix identifies one mask directly.
+		indexPlusOne = distinct[kmer>>shiftOffsetU]
+		if indexPlusOne != 0 {
+			i = int(indexPlusOne - 1)
+			mask = masks[i]
+			h = hashValues[i]
+
+			hash = kmer ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &locations[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				hashValues[i] = hash
+				kmers[i] = kmer
+			} else {
+				*locs = append(*locs, js)
+			}
+		} else if checkShorterPrefix {
+			prefix := kmer >> shiftOffset
+			// No distinct longer prefix matched, so check every mask in the
+			// contiguous bucket belonging to the shorter prefix.
+			begin, end = offsets[prefix], offsets[prefix+1]
+			if begin != end {
+				for _, index := range indexes[begin:end] {
+					i = int(index)
+					mask = masks[i]
+					h = hashValues[i]
+
+					hash = kmer ^ mask
+
+					if hash > h {
+						continue
+					}
+
+					// hash <= h
+					locs = &locations[i]
+					if hash < h {
+						*locs = (*locs)[:1]
+						(*locs)[0] = js
+
+						hashValues[i] = hash
+						kmers[i] = kmer
+					} else {
+						*locs = append(*locs, js)
+					}
+				}
+			}
+		}
+
+		// ---------- negative strand ----------
+
+		js |= 1 // add the strand flag to the location
+
+		indexPlusOne = distinct[kmerRC>>shiftOffsetU]
+		if indexPlusOne != 0 {
+			i = int(indexPlusOne - 1)
+			mask = masks[i]
+			h = hashValues[i]
+
+			hash = kmerRC ^ mask
+
+			if hash > h {
+				continue
+			}
+
+			// hash <= h
+			locs = &locations[i]
+			if hash < h {
+				*locs = (*locs)[:1]
+				(*locs)[0] = js
+
+				hashValues[i] = hash
+				kmers[i] = kmerRC
+			} else {
+				*locs = append(*locs, js)
+			}
+		} else if checkShorterPrefix {
+			prefix := kmerRC >> shiftOffset
+			begin, end = offsets[prefix], offsets[prefix+1]
+			if begin != end {
+				for _, index := range indexes[begin:end] {
+					i = int(index)
+					mask = masks[i]
+					h = hashValues[i]
+
+					hash = kmerRC ^ mask
+
+					if hash > h {
+						continue
+					}
+
+					// hash <= h
+					locs = &locations[i]
+					if hash < h {
+						*locs = (*locs)[:1]
+						(*locs)[0] = js
+
+						hashValues[i] = hash
+						kmers[i] = kmerRC
+					} else {
+						*locs = append(*locs, js)
+					}
+				}
+			}
+		}
+	}
+
+	lh.poolHashes.Put(hashes)
+	return _kmers, locses, nil
+}
+
 // MaskKmer returns the indexes of masks that possibly mask a k-mer.
 // IndexMasks or IndexMasksWithDistinctPrefixes is recommended to run first.
 // Don't forget to recycle the result via RecycleMaskKmerResult.

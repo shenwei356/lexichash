@@ -1,5 +1,9 @@
 # Changelog
 
+### v0.5.5 - 2026-08-21
+
+- Add `MaskKnownDistinctPrefixesWithStrandBias` for compatibility with LexicMap indexes v3.4 and earlier.
+
 ### v0.5.4 - 2026-08-20
 
 - **Fix `MaskKnownDistinctPrefixes` incorrectly skipping some negative-strand k-mers.**
