@@ -21,6 +21,7 @@
 package lexichash
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -184,6 +185,158 @@ func TestMaskKnownDistinctPrefixesRecycledResults(t *testing.T) {
 		if !slices.Equal((*gotLocses)[i], (*wantLocses)[i]) {
 			t.Fatalf("recycled locations for mask %d contain stale values", i)
 		}
+	}
+}
+
+func TestMaskSkipRegions(t *testing.T) {
+	lh := newLexicMapLexicHash(t)
+	sequence := deterministicSequence(1542)
+	skipRegions := []int{800, 830, 100, 130}
+	SortSkipRegions(skipRegions)
+
+	tests := []struct {
+		name string
+		mask func([]byte, []int) (*[]uint64, *[][]int, error)
+	}{
+		{"MaskKnownPrefixes", lh.MaskKnownPrefixes},
+		{"MaskKnownDistinctPrefixes", func(s []byte, regions []int) (*[]uint64, *[][]int, error) {
+			return lh.MaskKnownDistinctPrefixes(s, regions, true)
+		}},
+		{"MaskKnownDistinctPrefixesWithStrandBias", func(s []byte, regions []int) (*[]uint64, *[][]int, error) {
+			return lh.MaskKnownDistinctPrefixesWithStrandBias(s, regions, true)
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kmers, locses, err := test.mask(sequence, skipRegions)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lh.RecycleMaskResult(kmers, locses)
+
+			var before, between, after bool
+			for _, locations := range *locses {
+				for _, location := range locations {
+					start := location >> 1
+					end := start + lh.K - 1
+					for i := 0; i < len(skipRegions); i += 2 {
+						if start <= skipRegions[i+1] && end >= skipRegions[i] {
+							t.Fatalf("k-mer at [%d, %d] overlaps skipped region [%d, %d]", start, end, skipRegions[i], skipRegions[i+1])
+						}
+					}
+					switch {
+					case end < skipRegions[0]:
+						before = true
+					case start > skipRegions[1] && end < skipRegions[2]:
+						between = true
+					case start > skipRegions[3]:
+						after = true
+					}
+				}
+			}
+			if !before || !between || !after {
+				t.Fatalf("missing results outside skipped regions: before=%t, between=%t, after=%t", before, between, after)
+			}
+		})
+	}
+}
+
+func TestSortSkipRegions(t *testing.T) {
+	tests := []struct {
+		name    string
+		regions []int
+		want    []int
+	}{
+		{"nil", nil, nil},
+		{"empty", []int{}, []int{}},
+		{"single", []int{100, 130}, []int{100, 130}},
+		{"sorted", []int{100, 130, 400, 450, 800, 830}, []int{100, 130, 400, 450, 800, 830}},
+		{"reverse", []int{800, 830, 400, 450, 100, 130}, []int{100, 130, 400, 450, 800, 830}},
+		{"mixed", []int{400, 450, -20, -10, 800, 830, 100, 130}, []int{-20, -10, 100, 130, 400, 450, 800, 830}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			SortSkipRegions(test.regions)
+			if !slices.Equal(test.regions, test.want) {
+				t.Fatalf("unexpected regions: %v; want: %v", test.regions, test.want)
+			}
+		})
+	}
+}
+
+func TestMaskSkipRegionsInSecondRound(t *testing.T) {
+	lh, err := NewWithSeed(31, 1024, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence := make([]byte, 128)
+	for i := range sequence {
+		sequence[i] = 'C'
+	}
+	skipRegions := []int{40, 70}
+
+	tests := []struct {
+		name string
+		mask func([]byte, []int) (*[]uint64, *[][]int, error)
+	}{
+		{"Mask", lh.Mask},
+		{"MaskLongSeqs", lh.MaskLongSeqs},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kmers, locses, err := test.mask(sequence, skipRegions)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lh.RecycleMaskResult(kmers, locses)
+
+			for i, locations := range *locses {
+				if len(locations) == 0 {
+					t.Fatalf("mask %d has no second-round result", i)
+				}
+				for _, location := range locations {
+					start := location >> 1
+					end := start + lh.K - 1
+					if start <= skipRegions[1] && end >= skipRegions[0] {
+						t.Fatalf("second-round k-mer at [%d, %d] overlaps skipped region [%d, %d]", start, end, skipRegions[0], skipRegions[1])
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInvalidSkipRegions(t *testing.T) {
+	lh := newLexicMapLexicHash(t)
+	sequence := deterministicSequence(1542)
+	tests := []struct {
+		name string
+		mask func([]byte, []int) (*[]uint64, *[][]int, error)
+	}{
+		{"Mask", lh.Mask},
+		{"MaskKnownPrefixes", lh.MaskKnownPrefixes},
+		{"MaskKnownDistinctPrefixes", func(s []byte, regions []int) (*[]uint64, *[][]int, error) {
+			return lh.MaskKnownDistinctPrefixes(s, regions, true)
+		}},
+		{"MaskKnownDistinctPrefixesWithStrandBias", func(s []byte, regions []int) (*[]uint64, *[][]int, error) {
+			return lh.MaskKnownDistinctPrefixesWithStrandBias(s, regions, true)
+		}},
+		{"MaskLongSeqs", lh.MaskLongSeqs},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			kmers, locses, err := test.mask(sequence, []int{100})
+			if !errors.Is(err, ErrInvalidSkipRegions) {
+				t.Fatalf("expected ErrInvalidSkipRegions, got %v", err)
+			}
+			if kmers != nil || locses != nil {
+				t.Fatal("invalid skip regions returned non-nil results")
+			}
+		})
 	}
 }
 

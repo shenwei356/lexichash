@@ -1,5 +1,11 @@
 # Changelog
 
+### v0.6.0 - 2026-09-07
+
+- Change parameter `skipRegions` from `[][2]int` to a flat `[]int` of start/end pairs in all masking methods.
+- Add a function `SortSkipRegions` to sort the regions in place.
+- Fix `Mask` and `MaskLongSeqs` not applying `skipRegions` in the second round.
+
 ### v0.5.5 - 2026-08-21
 
 - Add `MaskKnownDistinctPrefixesWithStrandBias` for compatibility with LexicMap indexes v3.4 and earlier.

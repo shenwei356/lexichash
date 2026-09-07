@@ -45,6 +45,31 @@ var ErrPrefixOverflow = errors.New("lexichash: prefix should be in range of [3, 
 // ErrInsufficientMasks means the number of masks is too small.
 var ErrInsufficientMasks = errors.New("lexichash: insufficient masks (should be >=64)")
 
+// ErrInvalidSkipRegions means skipRegions does not contain start/end pairs.
+var ErrInvalidSkipRegions = errors.New("lexichash: skipRegions should contain start/end pairs")
+
+type skipRegionPairs []int
+
+func (regions skipRegionPairs) Len() int {
+	return len(regions) >> 1
+}
+
+func (regions skipRegionPairs) Less(i, j int) bool {
+	return regions[i<<1] < regions[j<<1]
+}
+
+func (regions skipRegionPairs) Swap(i, j int) {
+	i <<= 1
+	j <<= 1
+	regions[i], regions[j] = regions[j], regions[i]
+	regions[i+1], regions[j+1] = regions[j+1], regions[i+1]
+}
+
+// SortSkipRegions sorts consecutive start/end pairs in place by start position.
+func SortSkipRegions(regions []int) {
+	sort.Sort(skipRegionPairs(regions))
+}
+
 // LexicHash is for finding shared substrings between nucleotide sequences.
 type LexicHash struct {
 	K int // max length of shared substrings, should be in range of [4, 31]
@@ -472,9 +497,14 @@ func (lh *LexicHash) RecycleMaskResult(kmers *[]uint64, locses *[][]int) {
 // E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
 // where need to be ommitted.
 //
-// The regions should be 0-based and ascendingly sorted.
-// e.g., [100, 130], [200, 230] ...
-func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+// The regions should be 0-based and ascendingly sorted, with consecutive
+// start/end pairs, e.g., []int{100, 130, 200, 230}.
+// SortSkipRegions() can be used to sort the regions in place.
+func (lh *LexicHash) Mask(s []byte, skipRegions []int) (*[]uint64, *[][]int, error) {
+	if len(skipRegions)&1 != 0 {
+		return nil, nil, ErrInvalidSkipRegions
+	}
+
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
@@ -488,8 +518,8 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	var i, j, js int
 	var locs *[]int
 
-	nRegions := len(skipRegions)
-	checkRegion := nRegions > 0
+	nRegionValues := len(skipRegions)
+	checkRegion := nRegionValues > 0
 	var ri, rs, re int
 
 	// -----------------------------------------------------------------------------
@@ -506,7 +536,7 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	shiftOffset := (k - 3) << 1
@@ -527,11 +557,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 
@@ -620,9 +650,10 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 	// don't worry the efficiency, NewKmerIterator is optimized to reuse objects
 	iter, _ = iterator.NewKmerIterator(s, lh.K)
 
+	checkRegion = nRegionValues > 0
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	for {
@@ -645,11 +676,11 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 				continue
@@ -732,9 +763,14 @@ func (lh *LexicHash) Mask(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, 
 // E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
 // where need to be ommitted.
 //
-// The regions should be 0-based and ascendingly sorted.
-// e.g., [100, 130], [200, 230] ...
-func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+// The regions should be 0-based and ascendingly sorted, with consecutive
+// start/end pairs, e.g., []int{100, 130, 200, 230}.
+// SortSkipRegions() can be used to sort the regions in place.
+func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions []int) (*[]uint64, *[][]int, error) {
+	if len(skipRegions)&1 != 0 {
+		return nil, nil, ErrInvalidSkipRegions
+	}
+
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
@@ -748,8 +784,8 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 	var i, j, js int
 	var locs *[]int
 
-	nRegions := len(skipRegions)
-	checkRegion := nRegions > 0
+	nRegionValues := len(skipRegions)
+	checkRegion := nRegionValues > 0
 	var ri, rs, re int
 
 	// -----------------------------------------------------------------------------
@@ -773,7 +809,7 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	for {
@@ -792,11 +828,11 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 
@@ -908,9 +944,14 @@ func (lh *LexicHash) MaskKnownPrefixes(s []byte, skipRegions [][2]int) (*[]uint6
 // E.g., in reference indexing step, contigs of a genome can be concatenated with k-1 N's,
 // where need to be ommitted.
 //
-// The regions should be 0-based and ascendingly sorted.
-// e.g., [100, 130], [200, 230] ...
-func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+// The regions should be 0-based and ascendingly sorted, with consecutive
+// start/end pairs, e.g., []int{100, 130, 200, 230}.
+// SortSkipRegions() can be used to sort the regions in place.
+func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions []int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+	if len(skipRegions)&1 != 0 {
+		return nil, nil, ErrInvalidSkipRegions
+	}
+
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
@@ -931,8 +972,8 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 	var i, j, js int
 	var locs *[]int
 
-	nRegions := len(skipRegions)
-	checkRegion := nRegions > 0
+	nRegionValues := len(skipRegions)
+	checkRegion := nRegionValues > 0
 	var ri, rs, re int
 
 	// -----------------------------------------------------------------------------
@@ -964,7 +1005,7 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	for {
@@ -983,11 +1024,11 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 
@@ -1120,7 +1161,12 @@ func (lh *LexicHash) MaskKnownDistinctPrefixes(s []byte, skipRegions [][2]int, c
 
 // MaskKnownDistinctPrefixesWithStrandBias has a strand-bias bug.
 // It's only for backward-compatibility for LexicMap index v3.4 and early versions.
-func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegions [][2]int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+// skipRegions uses consecutive start/end pairs, as in MaskKnownDistinctPrefixes.
+func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegions []int, checkShorterPrefix bool) (*[]uint64, *[][]int, error) {
+	if len(skipRegions)&1 != 0 {
+		return nil, nil, ErrInvalidSkipRegions
+	}
+
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
 	locses := lh.poolLocses.Get().(*[][]int)  // locations of the matched k-mers
 	hashes := lh.poolHashes.Get().(*[]uint64) // hashes of matched k-mers
@@ -1141,8 +1187,8 @@ func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegio
 	var i, j, js int
 	var locs *[]int
 
-	nRegions := len(skipRegions)
-	checkRegion := nRegions > 0
+	nRegionValues := len(skipRegions)
+	checkRegion := nRegionValues > 0
 	var ri, rs, re int
 
 	// -----------------------------------------------------------------------------
@@ -1174,7 +1220,7 @@ func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegio
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	for {
@@ -1193,11 +1239,11 @@ func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegio
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 
@@ -1222,6 +1268,9 @@ func (lh *LexicHash) MaskKnownDistinctPrefixesWithStrandBias(s []byte, skipRegio
 
 			hash = kmer ^ mask
 
+			// There's a strand-bias bug here,
+			// which is only for backward-compatibility for LexicMap index v3.4 and early versions.
+			// It wrongly skips the negative strand.
 			if hash > h {
 				continue
 			}
@@ -1380,10 +1429,15 @@ func (lh *LexicHash) RecycleMaskKmerResult(list *[]int) {
 	}
 }
 
-// MaskLongSeqs is faster than Mask() for longer sequences by using longer 5-bp prefixes for creating the lookup table, requiring nMasks >= 1024.
-func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[][]int, error) {
+// MaskLongSeqs is faster than Mask() for longer sequences by using longer 5-bp
+// prefixes for creating the lookup table, requiring nMasks >= 1024.
+// skipRegions uses consecutive start/end pairs, as in Mask.
+func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions []int) (*[]uint64, *[][]int, error) {
 	if len(lh.Masks) < 1024 {
 		return nil, nil, fmt.Errorf("MaskLongSeqs is not support for masks < 1024")
+	}
+	if len(skipRegions)&1 != 0 {
+		return nil, nil, ErrInvalidSkipRegions
 	}
 
 	_kmers := lh.poolKmers.Get().(*[]uint64)  // matched k-mers
@@ -1399,8 +1453,8 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 	var i, j, js int
 	var locs *[]int
 
-	nRegions := len(skipRegions)
-	checkRegion := nRegions > 0
+	nRegionValues := len(skipRegions)
+	checkRegion := nRegionValues > 0
 	var ri, rs, re int
 
 	// -----------------------------------------------------------------------------
@@ -1420,7 +1474,7 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	shiftOffset5 := (k - 5) << 1
@@ -1442,11 +1496,11 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 
@@ -1545,9 +1599,10 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 	// don't worry the efficiency, NewKmerIterator is optimized to reuse objects
 	iter, _ = iterator.NewKmerIterator(s, lh.K)
 
+	checkRegion = nRegionValues > 0
 	if checkRegion {
 		ri = 0
-		rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+		rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 	}
 
 	for {
@@ -1566,11 +1621,11 @@ func (lh *LexicHash) MaskLongSeqs(s []byte, skipRegions [][2]int) (*[]uint64, *[
 		if checkRegion && rs <= j {
 			if j <= re { // in the region
 				if j == re { // update region to check
-					ri++
-					if ri == nRegions { // this is already the last one
+					ri += 2
+					if ri == nRegionValues { // this is already the last one
 						checkRegion = false
 					} else {
-						rs, re = skipRegions[ri][0]-k+1, skipRegions[ri][1]
+						rs, re = skipRegions[ri]-k+1, skipRegions[ri+1]
 					}
 				}
 				continue
