@@ -1,5 +1,10 @@
 # Changelog
 
+### v0.7.0 - 2026-10-08
+
+- Add `WindowMasker` for repeated short windows that need k-mers and winning mask indexes by position.
+- Add `Sketcher` to capture k-mer values for selected masks without computing location lists.
+
 ### v0.6.0 - 2026-09-07
 
 - Change parameter `skipRegions` from `[][2]int` to a flat `[]int` of start/end pairs in all masking methods.
